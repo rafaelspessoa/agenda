@@ -738,3 +738,25 @@ input.br-date{font-variant-numeric:tabular-nums}
 .au-escolha .btn{justify-content:flex-start}
 .fp-troca{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:inherit;margin-left:auto}
 .fp-troca select{font:inherit;padding:6px 10px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#111827}
+
+/* login inteiro na tela, sem rolagem: espaçamentos e logo acompanham a altura da janela */
+#auth{gap:clamp(8px,2.2vh,18px);padding:clamp(10px,2.5vh,24px) 16px}
+#auth>*{flex-shrink:0}
+.au-brand{width:min(360px,80vw,40vh)}
+.au-card{padding:clamp(16px,3.4vh,30px) clamp(18px,4vw,30px) clamp(14px,2.8vh,24px)}
+@media (max-height:780px){
+  #auth img.au-logo,#auth .au-logo{display:none}
+  .au-role{margin:0 0 12px}
+  .au-card h1{font-size:19px}
+  .au-sub{margin-bottom:12px}
+  .au-f{margin-bottom:9px}
+  .au-f input{padding:8px 11px}
+  .au-go{padding:9px}
+  .au-note{margin-top:10px}
+  .au-msg{min-height:14px;margin-bottom:4px}
+}
+@media (max-height:560px){
+  .au-brand{width:min(260px,70vw,30vh)}
+  .au-sub,.au-note,.au-foot{display:none}
+  .au-card h1{font-size:17px;margin-bottom:8px}
+}
