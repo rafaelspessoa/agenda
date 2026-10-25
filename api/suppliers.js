@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { database } from './_db.js';
+import { clientId, notify, topics } from './_realtime.js';
 import { localDate, requireUser, requestBody, respond, sameOrigin, shiftDate } from './_security.js';
 
 const DEFAULT_CFG = {
@@ -85,7 +86,9 @@ export default async function handler(req, res) {
         WHERE owner_id = ${user.buyer_id} AND store = 'demandas' AND record_id = ${id}
           AND payload->>'fornId' = ${user.supplier_id} AND payload->>'atend' = 'true'
         RETURNING record_id`;
-      return cancelled.length ? respond(res, 200, { ok: true }) : respond(res, 404, { error: 'Atendimento nao encontrado.' });
+      if (!cancelled.length) return respond(res, 404, { error: 'Atendimento nao encontrado.' });
+      await notify([topics.buyer(user.buyer_id), topics.reception(), topics.supplier(user.buyer_id)], clientId(req));
+      return respond(res, 200, { ok: true });
     }
 
     const date = String(body.date || '');
@@ -144,6 +147,7 @@ export default async function handler(req, res) {
       SELECT ${user.buyer_id}, 'demandas', ${id}, ${JSON.stringify(record)}::jsonb
       WHERE NOT EXISTS (SELECT 1 FROM conflicts) RETURNING record_id`;
     if (!inserted.length) return respond(res, 409, { error: 'Esse horario acabou de ficar indisponivel.' });
+    await notify([topics.buyer(user.buyer_id), topics.reception(), topics.supplier(user.buyer_id)], clientId(req));
     return respond(res, 201, { appointment: record });
   } catch (error) {
     console.error('suppliers endpoint failed', error);

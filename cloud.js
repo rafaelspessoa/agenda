@@ -1,5 +1,58 @@
 'use strict';
 
+/* Sinais instantâneos (Supabase Realtime, canal broadcast). O sinal não traz dados:
+   ao recebê-lo a tela busca de novo pela API autenticada. Protocolo Phoenix direto,
+   sem biblioteca externa (a CSP só permite scripts do próprio site). */
+const Realtime = {
+  ws: null, cfg: null, onSignal: null, ref: 0, hb: null, retry: 0, timer: null, joined: new Set(),
+  clientId: (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2)).replace(/[^\w-]/g, ''),
+  get connected() { return !!this.ws && this.ws.readyState === 1 && this.joined.size > 0; },
+  start(cfg, onSignal) {
+    this.stop();
+    if (!cfg || !cfg.url || !cfg.key || !Array.isArray(cfg.topics) || !cfg.topics.length || typeof WebSocket === 'undefined') return;
+    this.cfg = cfg; this.onSignal = onSignal; this.retry = 0;
+    this.connect();
+  },
+  stop() {
+    this.cfg = null; this.onSignal = null; this.joined.clear();
+    clearInterval(this.hb); clearTimeout(this.timer); clearTimeout(this._debounce);
+    if (this.ws) { const ws = this.ws; this.ws = null; ws.onclose = null; try { ws.close(); } catch (e) { } }
+  },
+  send(topic, event, payload) { try { this.ws.send(JSON.stringify({ topic, event, payload, ref: String(++this.ref) })); } catch (e) { } },
+  connect() {
+    const cfg = this.cfg; if (!cfg) return;
+    const ws = new WebSocket(cfg.url.replace(/^http/, 'ws') + '/realtime/v1/websocket?apikey=' + encodeURIComponent(cfg.key) + '&vsn=1.0.0');
+    this.ws = ws; this.joined.clear();
+    ws.onopen = () => {
+      cfg.topics.forEach(t => this.send('realtime:' + t, 'phx_join', { config: { broadcast: { self: false }, presence: { key: '' }, private: false } }));
+      clearInterval(this.hb);
+      this.hb = setInterval(() => this.send('phoenix', 'heartbeat', {}), 25000);
+    };
+    ws.onmessage = ev => {
+      let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+      if (m.event === 'phx_reply' && m.payload && m.payload.status === 'ok' && String(m.topic).startsWith('realtime:')) {
+        const first = !this.joined.size;
+        this.joined.add(m.topic); this.retry = 0;
+        // ao (re)conectar busca uma vez: cobre o que mudou enquanto estava desconectado
+        if (first) this.fire();
+      }
+      if (m.event === 'broadcast' && !(m.payload && m.payload.payload && m.payload.payload.from === this.clientId)) this.fire();
+    };
+    ws.onclose = () => {
+      clearInterval(this.hb); this.joined.clear();
+      if (!this.cfg || this.ws !== ws) return;
+      const delay = Math.min(15000, 500 * Math.pow(2, this.retry++));
+      this.timer = setTimeout(() => this.connect(), delay);
+    };
+    ws.onerror = () => { try { ws.close(); } catch (e) { } };
+  },
+  // vários sinais seguidos viram uma única atualização
+  fire() {
+    clearTimeout(this._debounce);
+    this._debounce = setTimeout(() => { if (this.onSignal) this.onSignal(); }, 120);
+  }
+};
+
 const Cloud = {
   user: null,
   ready: false,
@@ -16,6 +69,7 @@ const Cloud = {
 
   async request(path, options) {
     const opts = Object.assign({ credentials: 'same-origin', headers: {} }, options || {});
+    opts.headers['X-Client-Id'] = Realtime.clientId; // o servidor não manda o sinal de volta para quem gravou
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15000);
     opts.signal = opts.signal || controller.signal;
@@ -40,17 +94,29 @@ const Cloud = {
   },
 
   async current() {
-    try { return (await this.request('/api/auth')).user || null; }
+    try { const result = await this.request('/api/auth'); this.realtimeCfg = result.realtime || null; return result.user || null; }
     catch (error) { if (error.status === 401) return null; throw error; }
   },
 
   async login(credentials) {
-    return (await this.request('/api/auth', { method: 'POST', body: credentials })).user;
+    const result = await this.request('/api/auth', { method: 'POST', body: credentials });
+    this.realtimeCfg = result.realtime || null;
+    return result.user;
+  },
+
+  // o que cada perfil faz ao receber um sinal do servidor
+  startRealtime() {
+    Realtime.start(this.realtimeCfg, () => {
+      if (this.isBuyer()) { this.flush(); this.pullBuyerData(); }
+      else if (this.user?.role === 'reception') Recep.atualizar();
+      else if (this.user?.role === 'supplier') this.loadSupplier().then(() => Forn.render()).catch(error => { this.error = error.message; });
+    });
   },
 
   async logout() {
     try { await this.request('/api/auth', { method: 'POST', body: { action: 'logout' } }); }
     finally {
+      Realtime.stop();
       if (this.user) { try { localStorage.removeItem('agenda_admin_users_' + this.user.id); } catch (e) { } }
       if (typeof AdminUsers !== 'undefined') AdminUsers.data = null;
       this.user = null;
@@ -117,11 +183,13 @@ const Cloud = {
       document.body.classList.add('locked');
       this.releaseGate(true);
       Recep.abrir();
+      this.startPolling();
     } else if (user.role === 'supplier') {
       await this.loadSupplier();
       document.body.classList.add('locked');
       this.releaseGate(true);
       Forn.abrir(this.supplierSnapshot.supplier);
+      this.startPolling();
     }
   },
 
@@ -190,7 +258,7 @@ const Cloud = {
       const hadError = !!this.error;
       this.error = '';
       // Redesenhar a cada consulta sem mudancas apagava formularios em edicao
-      if (changed) DB.changed('@sync');
+      if (changed) { DB.changed('@sync'); if (typeof Aviso !== 'undefined') Aviso.check(); }
       else if (hadError && App.started) App.refreshChrome();
     } catch (error) {
       this.error = error.message;
@@ -319,20 +387,36 @@ const Cloud = {
   },
 
   async markReception(buyerId, id, state) {
+    const changes = {};
     for (const field of ['chegouEm', 'iniciouEm', 'finalizouEm', 'avisoVistoEm', 'avisoEm']) {
-      if (Object.prototype.hasOwnProperty.call(state, field)) {
-        await this.request('/api/reception', { method: 'PATCH', body: { buyerId, id, field, value: state[field] } });
-      }
+      if (Object.prototype.hasOwnProperty.call(state, field)) changes[field] = state[field];
     }
+    // uma única gravação: o comprador recebe chegada e aviso juntos
+    await this.request('/api/reception', { method: 'PATCH', body: { buyerId, id, changes } });
+  },
+
+  // busca o estado atual do servidor conforme o perfil
+  refreshNow() {
+    if (this.isBuyer()) { this.flush(); this.pullBuyerData(); }
+    else if (this.user?.role === 'reception') Recep.atualizar();
+    else if (this.user?.role === 'supplier') this.loadSupplier().then(() => Forn.render()).catch(error => { this.error = error.message; });
   },
 
   startPolling() {
     clearInterval(this.timer);
+    this.startRealtime();
+    let ultimo = Date.now();
     this.timer = setInterval(() => {
-      if (this.isBuyer()) { this.flush(); this.pullBuyerData(); }
-      else if (this.user?.role === 'reception') Recep.atualizar();
-      else if (this.user?.role === 'supplier') this.loadSupplier().then(() => Forn.render()).catch(error => { this.error = error.message; });
+      // com o canal instantâneo ativo, a consulta periódica vira só reserva (a cada 60 s)
+      if (Realtime.connected && Date.now() - ultimo < 60000) return;
+      ultimo = Date.now();
+      this.refreshNow();
     }, 10000);
+    if (!this._visOn) {
+      this._visOn = true;
+      // ao voltar para a aba (o navegador desacelera abas em segundo plano), atualiza na hora
+      document.addEventListener('visibilitychange', () => { if (!document.hidden && this.user) this.refreshNow(); });
+    }
   },
 
   showSyncError() {

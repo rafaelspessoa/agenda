@@ -2731,7 +2731,8 @@ const Recep = {
     this.render();
     this.atualizar();
     clearInterval(this.timer);
-    this.timer = setInterval(() => { if (!document.getElementById('recepPortal')) return clearInterval(this.timer); this.atualizar(); }, 10000);
+    // conta da recepção na nuvem: quem atualiza é o canal instantâneo (Cloud.startPolling)
+    this.timer = setInterval(() => { if (!document.getElementById('recepPortal')) return clearInterval(this.timer); if (Cloud.user?.role !== 'reception') this.atualizar(); }, 10000);
   },
   async sair() {
     clearInterval(this.timer);
@@ -2742,15 +2743,18 @@ const Recep = {
   },
   // relê o banco deste navegador (outras abas) e a pasta compartilhada (outros computadores)
   async atualizar() {
-    if (this._lendo) return; this._lendo = true;
+    // sinal que chega durante uma leitura não se perde: lê de novo ao terminar
+    if (this._lendo) { this._denovo = true; return; }
+    this._lendo = true;
     try {
       if (Cloud.user?.role === 'reception') await Cloud.refreshReception();
       else {
         if (DB.idb) await DB.loadAll();
         if (Share.ok()) { try { await Share.lerTodos(); Share.erro = ''; } catch (e) { Share.falha(e); } }
       }
-    } finally { this._lendo = false; }
+    } catch (e) { console.error(e); } finally { this._lendo = false; }
     this.renderSeguro();
+    if (this._denovo) { this._denovo = false; this.atualizar(); }
   },
   // não redesenha enquanto a pessoa digita na busca ou mexe na data
   renderSeguro() {

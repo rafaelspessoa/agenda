@@ -1,4 +1,5 @@
 import { database } from './_db.js';
+import { clientId, notify, topics } from './_realtime.js';
 import { requireUser, requestBody, respond, sameOrigin } from './_security.js';
 
 const STORES = new Set(['demandas', 'laboratorios', 'compras', 'historico', 'produtos', 'estoque', 'vendas', 'fornecedores', 'filiais', 'pedidos', 'config']);
@@ -9,6 +10,10 @@ export default async function handler(req, res) {
     const user = await requireUser(req, res, ['admin', 'buyer']);
     if (!user) return;
     const sql = database();
+    // avisa na hora as outras telas: o próprio comprador em outros aparelhos, a recepção e o fornecedor
+    const avisar = stores => notify([topics.buyer(user.id)]
+      .concat(stores.includes('demandas') ? [topics.reception(), topics.supplier(user.id)] : [])
+      .concat(stores.includes('config') ? [topics.supplier(user.id)] : []), clientId(req));
     if (req.method === 'GET') {
       const rows = await sql`SELECT store, record_id AS id, payload, updated_at
         FROM app_records WHERE owner_id = ${user.id} ORDER BY store, record_id`;
@@ -32,6 +37,7 @@ export default async function handler(req, res) {
         SELECT ${user.id}, incoming.store, incoming.id, incoming.payload
         FROM jsonb_to_recordset(${encoded}::jsonb) AS incoming(store text, id text, payload jsonb)
         ON CONFLICT (owner_id, store, record_id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()`;
+      await avisar([...new Set(records.map(item => item.store))]);
       return respond(res, 200, { imported: records.length, result });
     }
     if (!['PUT', 'DELETE'].includes(req.method)) return respond(res, 405, { error: 'Metodo nao permitido.' });
@@ -43,6 +49,7 @@ export default async function handler(req, res) {
     if (!STORES.has(store) || (req.method !== 'DELETE' && (!id || id.length > 200))) return respond(res, 400, { error: 'Registro invalido.' });
     if (req.method === 'DELETE' && body.action === 'clear') {
       await sql`DELETE FROM app_records WHERE owner_id = ${user.id} AND store = ${store}`;
+      await avisar([store]);
       return respond(res, 200, { ok: true });
     }
     if (!id || id.length > 200) return respond(res, 400, { error: 'Registro invalido.' });
@@ -50,6 +57,7 @@ export default async function handler(req, res) {
 
     if (req.method === 'DELETE') {
       await sql`DELETE FROM app_records WHERE owner_id = ${user.id} AND store = ${store} AND record_id = ${id}`;
+      await avisar([store]);
       return respond(res, 200, { ok: true });
     }
 
@@ -84,12 +92,14 @@ export default async function handler(req, res) {
         DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()
         RETURNING record_id`;
       if (!saved.length) return respond(res, 409, { error: 'Esse horario ja esta ocupado por outro agendamento.' });
+      await avisar([store]);
       return respond(res, 200, { ok: true });
     }
     await sql`INSERT INTO app_records (owner_id, store, record_id, payload)
       VALUES (${user.id}, ${store}, ${id}, ${serialized}::jsonb)
       ON CONFLICT (owner_id, store, record_id)
       DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()`;
+    await avisar([store]);
     return respond(res, 200, { ok: true });
   } catch (error) {
     console.error('data endpoint failed', error);

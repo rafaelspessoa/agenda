@@ -1,4 +1,5 @@
 import { database } from './_db.js';
+import { clientId, notify, topics } from './_realtime.js';
 import { localDate, requireUser, requestBody, respond, sameOrigin, shiftDate } from './_security.js';
 
 const ATTENDANCE_FIELDS = new Set(['chegouEm', 'iniciouEm', 'finalizouEm', 'avisoEm', 'avisoVistoEm']);
@@ -31,17 +32,23 @@ export default async function handler(req, res) {
     if (req.method !== 'PATCH') return respond(res, 405, { error: 'Metodo nao permitido.' });
     if (!sameOrigin(req)) return respond(res, 403, { error: 'Origem nao permitida.' });
     const body = requestBody(req);
-    const field = String(body.field || '');
     const buyerId = String(body.buyerId || '');
     const id = String(body.id || '');
-    const value = body.value == null ? null : String(body.value);
-    if (!ATTENDANCE_FIELDS.has(field) || !buyerId || !id || (value && !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d/.test(value))) {
+    // várias marcações (ex.: chegada + aviso) numa única gravação; mantém o formato antigo field/value
+    const changes = body.changes && typeof body.changes === 'object' && !Array.isArray(body.changes)
+      ? body.changes : { [String(body.field || '')]: body.value };
+    const entries = Object.entries(changes).map(([field, value]) => [field, value == null ? null : String(value)]);
+    if (!buyerId || !id || !entries.length || entries.some(([field, value]) => !ATTENDANCE_FIELDS.has(field) || (value && !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d/.test(value)))) {
       return respond(res, 400, { error: 'Atualizacao de atendimento invalida.' });
     }
-    const rows = await sql`UPDATE app_records SET payload = payload || jsonb_build_object(${field}, ${value}), updated_at = NOW()
+    const patch = JSON.stringify(Object.fromEntries(entries));
+    const rows = await sql`UPDATE app_records SET payload = payload || ${patch}::jsonb, updated_at = NOW()
       WHERE owner_id = ${buyerId} AND store = 'demandas' AND record_id = ${id}
         AND (payload->>'atend' = 'true' OR COALESCE(payload->>'hora', '') <> '') RETURNING record_id`;
-    return rows.length ? respond(res, 200, { ok: true }) : respond(res, 404, { error: 'Atendimento nao encontrado.' });
+    if (!rows.length) return respond(res, 404, { error: 'Atendimento nao encontrado.' });
+    // o comprador recebe o aviso na hora; outras telas da recepção também atualizam
+    await notify([topics.buyer(buyerId), topics.reception()], clientId(req));
+    return respond(res, 200, { ok: true });
   } catch (error) {
     console.error('reception endpoint failed', error);
     return respond(res, 500, { error: 'Falha ao acessar o painel da recepcao.' });

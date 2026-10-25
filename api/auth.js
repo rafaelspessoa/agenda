@@ -1,11 +1,12 @@
 import { database } from './_db.js';
+import { realtimeConfig } from './_realtime.js';
 import { createSession, currentUser, endSession, failedLogin, hashToken, loginRolesForProfile, normalizeUsername, publicUser, requestBody, respond, sameOrigin, verifyPassword } from './_security.js';
 
 export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       const user = await currentUser(req);
-      return user ? respond(res, 200, { user: publicUser(user) }) : respond(res, 401, { error: 'Entre para continuar.' });
+      return user ? respond(res, 200, { user: publicUser(user), realtime: realtimeConfig(user) }) : respond(res, 401, { error: 'Entre para continuar.' });
     }
     if (req.method !== 'POST') return respond(res, 405, { error: 'Metodo nao permitido.' });
     if (!sameOrigin(req)) return respond(res, 403, { error: 'Origem nao permitida.' });
@@ -56,7 +57,7 @@ export default async function handler(req, res) {
 
     if (!user) return respond(res, 401, { error: 'Usuario, senha ou codigo incorretos.' });
     await createSession(res, user, rateKey);
-    return respond(res, 200, { user: publicUser(user) });
+    return respond(res, 200, { user: publicUser(user), realtime: realtimeConfig(user) });
   } catch (error) {
     console.error('auth endpoint failed', error);
     return respond(res, 500, { error: 'Falha ao autenticar. Verifique a configuracao do servidor.' });
