@@ -2381,7 +2381,7 @@ const Auth = {
         <button class="btn primary au-go" type="submit">Criar acesso e entrar</button>
         <p class="au-note">${icon('shield', 'xs')} A senha impede que outras pessoas abram a agenda neste computador. Ela é guardada criptografada e não vai junto com o backup.</p>
       </form>`;
-    else if (mode === 'login') body = head('', 'Acesso ao sistema de agendamento') + `
+    else if (mode === 'login') body = head('Área comercial', 'Acesso ao sistema de agendamento') + `
       <form id="auForm" autocomplete="on">
         <label class="au-f"><span>Usuário</span><input name="usuario" value="${esc(a && a.usuario || '')}" autocomplete="username" autocapitalize="none" required></label>
         ${pw('senha', 'Senha', 'current-password')}
