@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { hashPassword, localDate, normalizeUsername, shiftDate, verifyPassword } from '../api/_security.js';
+import { hashPassword, localDate, loginRolesForProfile, normalizeUsername, shiftDate, verifyPassword } from '../api/_security.js';
 
 test('password hashes verify without retaining the raw password', async () => {
   const password = 'A-very-strong-test-password-2026';
@@ -19,4 +19,10 @@ test('usernames normalize consistently', () => {
 test('date windows use the configured Sao Paulo timezone', () => {
   assert.equal(localDate(new Date('2026-01-01T02:30:00.000Z')), '2025-12-31');
   assert.equal(shiftDate('2026-01-01', -1), '2025-12-31');
+});
+
+test('buyer login accepts buyer and admin accounts but reception remains isolated', () => {
+  assert.deepEqual(loginRolesForProfile('buyer'), ['buyer', 'admin']);
+  assert.deepEqual(loginRolesForProfile('reception'), ['reception']);
+  assert.deepEqual(loginRolesForProfile('admin'), []);
 });

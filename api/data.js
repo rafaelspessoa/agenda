@@ -65,6 +65,9 @@ export default async function handler(req, res) {
       if (!/^\d{4}-\d\d-\d\d$/.test(date) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(start) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(end) || end < start) {
         return respond(res, 400, { error: 'Data ou horario do agendamento invalido.' });
       }
+      const cfgRows = await sql`SELECT payload->'value'->>'passo' AS passo FROM app_records
+        WHERE owner_id = ${user.id} AND store = 'config' AND record_id = 'fornCfg' LIMIT 1`;
+      const step = Math.max(5, Number(cfgRows[0]?.passo) || 30);
       const saved = await sql`WITH slot_lock AS MATERIALIZED (
           SELECT pg_advisory_xact_lock(hashtext(${user.id}), hashtext(${date}))
         ), conflicts AS MATERIALIZED (
@@ -72,7 +75,7 @@ export default async function handler(req, res) {
           WHERE owner_id = ${user.id} AND store = 'demandas' AND record_id <> ${id}
             AND payload->>'data' = ${date} AND COALESCE(payload->>'status', '') <> 'Cancelado'
             AND COALESCE(payload->>'hora', '') < ${end}
-            AND COALESCE(NULLIF(payload->>'horaFim', ''), to_char((payload->>'hora')::time + (30 * INTERVAL '1 minute'), 'HH24:MI')) > ${start}
+            AND COALESCE(NULLIF(payload->>'horaFim', ''), to_char((payload->>'hora')::time + (${step} * INTERVAL '1 minute'), 'HH24:MI')) > ${start}
         )
         INSERT INTO app_records (owner_id, store, record_id, payload)
         SELECT ${user.id}, ${store}, ${id}, ${serialized}::jsonb FROM slot_lock

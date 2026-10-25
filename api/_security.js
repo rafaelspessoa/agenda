@@ -29,6 +29,12 @@ export function normalizeUsername(value) {
   return String(value || '').normalize('NFKC').trim().toLowerCase();
 }
 
+export function loginRolesForProfile(profile) {
+  if (profile === 'buyer') return ['buyer', 'admin'];
+  if (profile === 'reception') return ['reception'];
+  return [];
+}
+
 export function localDate(value = new Date()) {
   const parts = new Intl.DateTimeFormat('en', {
     timeZone: process.env.APP_TIME_ZONE || 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit'

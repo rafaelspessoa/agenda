@@ -1,25 +1,28 @@
 # Agenda e Planejamento
 
-Aplicacao web para compradores, recepcao e fornecedores, hospedada na Vercel com PostgreSQL gerenciado pela Neon. Compradores e recepcao acessam com contas individuais; fornecedores entram por um codigo individual emitido pelo comprador.
+Aplicacao web para compradores, recepcao e fornecedores, hospedada na Vercel com PostgreSQL gerenciado pelo Supabase. Compradores e recepcao acessam com contas individuais; fornecedores entram por um codigo individual emitido pelo comprador.
 
 ## Arquivos principais
 
-- `AGENDA.html`, `agenda.css` e `agenda.js`: interface e regras de negocio existentes.
+- `AGENDA.html`, `agenda.css` e `agenda.js`: interface e regras de negocio.
 - `cloud.js`: adaptador de autenticacao, cache local e sincronizacao.
 - `api/`: endpoints de autenticacao, dados, contas, recepcao e fornecedores.
-- `db/schema.sql`: tabelas, indices e restricoes do PostgreSQL.
+- `db/schema.sql`: tabelas, indices, restricoes e RLS do PostgreSQL.
+- `scripts/apply-schema.mjs`: aplica o esquema Supabase.
 - `scripts/bootstrap-admin.mjs`: cria uma unica conta administrativa inicial.
 
 ## Publicacao
 
-1. Crie um banco PostgreSQL na Neon e execute `db/schema.sql` no editor SQL do provedor.
-2. Configure na Vercel as variaveis `DATABASE_URL` e `APP_TIME_ZONE` (`America/Sao_Paulo` por padrao). Nunca coloque a URL de conexao ou qualquer senha em `agenda.js` ou no navegador.
-3. Publique a pasta como projeto Vercel. O arquivo `vercel.json` define a API e os cabecalhos de seguranca.
-4. Instale as dependencias (`npm install`), obtenha uma conexao de banco em `.env.local` e defina `APP_ADMIN_USERNAME`, `APP_ADMIN_NAME` e `APP_ADMIN_PASSWORD` nesse arquivo. Use senha forte e nao o envie ao Git.
-5. Execute `npm run bootstrap:admin` uma unica vez contra o banco de producao. A senha inicial nao e armazenada em texto; remova-a de `.env.local` depois.
-6. Entre no endereco HTTPS publicado como administrador. Cadastre os compradores e a recepcao. Cada comprador cadastra fornecedores e compartilha o codigo emitido pelo sistema.
+1. Crie um projeto no Supabase e aguarde a conclusao do provisionamento.
+2. Em **Connect**, escolha a connection string do **Transaction pooler** (porta `6543`). Copie-a para `SUPABASE_DB_URL` em `.env.local`.
+3. Em **Database Settings → SSL Configuration**, baixe o certificado raiz do projeto. Localmente, deixe o arquivo `prod-ca-2021.crt` na raiz do projeto; o cliente o carrega e valida automaticamente. Na Vercel, configure o PEM completo em `SUPABASE_DB_CA`. Nao desative a verificacao TLS.
+4. Execute `npm run db:apply`. O comando testa a conexao, aplica `db/schema.sql` e confirma as quatro tabelas, sem imprimir credenciais.
+5. Configure `SUPABASE_DB_URL`, `SUPABASE_DB_CA` e `APP_TIME_ZONE` (`America/Sao_Paulo` por padrao) como variaveis da Vercel. Nunca coloque a connection string no navegador.
+6. Publique a pasta como projeto Vercel. O arquivo `vercel.json` define a API e os cabecalhos de seguranca.
+7. Defina `APP_ADMIN_USERNAME`, `APP_ADMIN_NAME` e `APP_ADMIN_PASSWORD` em `.env.local`; execute `npm run bootstrap:admin` uma unica vez contra o banco publicado. Remova a senha inicial do ambiente depois.
+8. Entre no endereco HTTPS como administrador, cadastre compradores e recepcao e compartilhe os convites de fornecedor.
 
-Para desenvolvimento, instale uma Vercel CLI atual fora das dependencias do projeto (`npm install --global vercel`), configure `.env.local` e use `npm run dev`. Nao use dados reais ate validar o ambiente, as contas e os backups.
+Para desenvolvimento, instale uma Vercel CLI atual fora das dependencias do projeto (`npm install --global vercel`), configure `.env.local` e execute `vercel dev` diretamente. Nao crie um script npm `dev` que invoque `vercel dev`, pois isso causa recursao. Nao envie `.env.local` ao Git nem use dados reais antes de validar contas e backups.
 
 ## Acesso e dados
 
@@ -33,4 +36,4 @@ Para desenvolvimento, instale uma Vercel CLI atual fora das dependencias do proj
 
 Execute `npm run check`, confira as variaveis de ambiente e teste com contas descartaveis: dois compradores, uma recepcao e um fornecedor. Verifique isolamento entre compradores, chegada/inicio/finalizacao na recepcao, reserva concorrente do mesmo horario, revogacao de fornecedor, logout/expiracao de sessao e recuperacao de backup.
 
-Este repositorio nao inclui credenciais nem uma instancia Neon/Vercel provisionada. A integracao so fica operacional depois de configurar e publicar esses servicos pela conta autorizada da empresa.
+O servidor usa a connection string somente em codigo de backend, com TLS; nao e necessario expor a chave anon do Supabase no navegador. Este repositorio nao inclui credenciais nem um projeto Supabase/Vercel provisionado. A integracao so fica operacional depois de configurar e publicar esses servicos pela conta autorizada da empresa.

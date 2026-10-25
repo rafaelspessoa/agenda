@@ -12,13 +12,23 @@ const Cloud = {
   supplierCodes: new Map(),
   supplierSnapshot: null,
 
+  isBuyer(user = this.user) { return !!user && ['buyer', 'admin'].includes(user.role); },
+
   async request(path, options) {
     const opts = Object.assign({ credentials: 'same-origin', headers: {} }, options || {});
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    opts.signal = opts.signal || controller.signal;
     if (opts.body && typeof opts.body !== 'string') {
       opts.headers['Content-Type'] = 'application/json';
       opts.body = JSON.stringify(opts.body);
     }
-    const response = await fetch(path, opts);
+    let response;
+    try { response = await fetch(path, opts); }
+    catch (error) {
+      if (error.name === 'AbortError') throw new Error('O servidor demorou para responder. Tente novamente.');
+      throw error;
+    } finally { clearTimeout(timer); }
     let result = {};
     try { result = await response.json(); } catch (e) { }
     if (!response.ok) {
@@ -86,12 +96,10 @@ const Cloud = {
     const profile = { id: user.id, usuario: user.username, nome: user.name, role: user.role, buyerId: user.buyerId, supplierId: user.supplierId };
     await DB.setCfg('auth', profile, true);
 
-    if (user.role === 'buyer' || user.role === 'admin') {
-      if (user.role === 'buyer') {
-        try { await this.loadBuyerData(); }
-        catch (error) { await this.logout(); throw error; }
-      }
-      this.ready = user.role === 'buyer';
+    if (this.isBuyer(user)) {
+      try { await this.loadBuyerData(); }
+      catch (error) { await this.logout(); throw error; }
+      this.ready = true;
       this.startPolling();
       this.releaseGate(false);
       return;
@@ -155,21 +163,24 @@ const Cloud = {
     try {
       const { records } = await this.request('/api/data');
       const incoming = new Map(records.map(item => [`${item.store}:${item.id}`, item.payload]));
+      let changed = false;
       for (const store of STORES) {
         if (store === 'config') continue;
         for (const local of DB.all(store)) {
           const key = `${store}:${local.id}`;
-          if (!incoming.has(key) && !this.isPending(store, local.id)) await DB.del(store, local.id, true);
+          if (!incoming.has(key) && !this.isPending(store, local.id)) { await DB.del(store, local.id, true); changed = true; }
         }
       }
       for (const item of records) {
-        const key = `${item.store}:${item.id}`;
         if (this.isPending(item.store, item.id)) continue;
         const local = DB.get(item.store, item.id);
-        if (!local || JSON.stringify(DB._clean(local)) !== JSON.stringify(item.payload)) await DB.put(item.store, item.payload, true);
+        if (!local || JSON.stringify(DB._clean(local)) !== JSON.stringify(item.payload)) { await DB.put(item.store, item.payload, true); changed = true; }
       }
+      const hadError = !!this.error;
       this.error = '';
-      DB.changed('@sync');
+      // Redesenhar a cada consulta sem mudancas apagava formularios em edicao
+      if (changed) DB.changed('@sync');
+      else if (hadError && App.started) App.refreshChrome();
     } catch (error) {
       this.error = error.message;
       this.showSyncError();
@@ -301,7 +312,7 @@ const Cloud = {
   startPolling() {
     clearInterval(this.timer);
     this.timer = setInterval(() => {
-      if (this.user?.role === 'buyer') { this.flush(); this.pullBuyerData(); }
+      if (this.isBuyer()) { this.flush(); this.pullBuyerData(); }
       else if (this.user?.role === 'reception') Recep.atualizar();
       else if (this.user?.role === 'supplier') this.loadSupplier().then(() => Forn.render()).catch(error => { this.error = error.message; });
     }, 10000);

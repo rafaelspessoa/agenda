@@ -1,5 +1,5 @@
 import { database } from './_db.js';
-import { clearLoginFailures, createSession, currentUser, endSession, failedLogin, hashToken, loginLock, normalizeUsername, publicUser, requestBody, respond, sameOrigin, verifyPassword } from './_security.js';
+import { clearLoginFailures, createSession, currentUser, endSession, failedLogin, hashToken, loginLock, loginRolesForProfile, normalizeUsername, publicUser, requestBody, respond, sameOrigin, verifyPassword } from './_security.js';
 
 export default async function handler(req, res) {
   try {
@@ -32,17 +32,18 @@ export default async function handler(req, res) {
     } else {
       const username = normalizeUsername(body.username);
       const expectedRole = String(body.role || '');
+      const allowedRoles = loginRolesForProfile(expectedRole);
       if (username.length < 2 || username.length > 80 || String(body.password || '').length > 256) {
         return respond(res, 400, { error: 'Informe usuario e senha validos.' });
       }
-      if (!['admin', 'buyer', 'reception'].includes(expectedRole)) return respond(res, 400, { error: 'Perfil de acesso invalido.' });
+      if (!allowedRoles.length) return respond(res, 400, { error: 'Perfil de acesso invalido.' });
       const rateKey = expectedRole + ':' + username;
       const retry = await loginLock(rateKey);
       if (retry) return respond(res, 429, { error: `Muitas tentativas. Tente novamente em ${retry} segundos.` });
       const rows = await sql`SELECT id, username, display_name, role, buyer_id, supplier_id, password_hash
-        FROM app_users WHERE username_key = ${username} AND active = TRUE LIMIT 1`;
+        FROM app_users WHERE username_key = ${username} AND role = ANY(${allowedRoles}) AND active = TRUE LIMIT 1`;
       const candidate = rows[0];
-      if (candidate && candidate.role === expectedRole && await verifyPassword(body.password, candidate.password_hash)) user = candidate;
+      if (candidate && allowedRoles.includes(candidate.role) && await verifyPassword(body.password, candidate.password_hash)) user = candidate;
       if (!user) await failedLogin(rateKey);
       else await clearLoginFailures(rateKey);
     }

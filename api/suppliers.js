@@ -127,7 +127,7 @@ export default async function handler(req, res) {
       'Agendado pelo fornecedor na area do fornecedor.';
     const record = {
       id, titulo: title, data: date, hora: startText, horaFim: endText, tipo: 'Compromisso', status: 'A fazer',
-      prioridade: 'MEDIA', recorrencia: { tipo: 'nenhuma' }, descricao, atend: true,
+      prioridade: 'MEDIA', recorrencia: { tipo: 'nenhuma' }, descricao: description, atend: true,
       fornId: user.supplier_id, fornNome: account.supplier.nome, compradorNome: '', assunto: String(body.subject || '').slice(0, 160),
       agendadoPor: 'fornecedor', origem: 'area do fornecedor', industrias: industries.map(item => item.nome || item)
     };

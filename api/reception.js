@@ -20,7 +20,7 @@ export default async function handler(req, res) {
           'agendadoPor', r.payload->'agendadoPor', 'atend', r.payload->'atend', 'industrias', r.payload->'industrias'
         )) AS appointment
         FROM app_records r JOIN app_users u ON u.id = r.owner_id
-        WHERE r.store = 'demandas' AND u.role = 'buyer' AND r.payload->>'atend' = 'true'
+        WHERE r.store = 'demandas' AND u.role IN ('buyer', 'admin') AND r.payload->>'atend' = 'true'
           AND COALESCE(r.payload->>'status', '') <> 'Cancelado'
           AND r.payload->>'data' BETWEEN ${fromDate} AND ${toDate}
         ORDER BY r.payload->>'data', r.payload->>'hora' LIMIT 1000`;

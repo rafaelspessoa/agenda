@@ -12,8 +12,17 @@ export default async function handler(req, res) {
     if (req.method === 'GET') {
       const admin = await requireUser(req, res, ['admin']);
       if (!admin) return;
-      const rows = await database()`SELECT id, username, display_name, role, active, buyer_id FROM app_users ORDER BY role, display_name`;
-      return respond(res, 200, { users: rows.map(user => ({ id: user.id, username: user.username, name: user.display_name, role: user.role, active: user.active, buyerId: user.buyer_id })) });
+      const [rows, suppliers] = await Promise.all([
+        database()`SELECT id, username, display_name, role, active, buyer_id FROM app_users ORDER BY role, display_name`,
+        database()`SELECT s.supplier_id AS id, s.name, s.buyer_id AS "buyerId", buyer.display_name AS "buyerName", s.industries, s.active
+          FROM suppliers s JOIN app_users buyer ON buyer.id = s.buyer_id
+          WHERE buyer.role IN ('buyer', 'admin')
+          ORDER BY buyer.display_name, s.name`
+      ]);
+      return respond(res, 200, {
+        users: rows.map(user => ({ id: user.id, username: user.username, name: user.display_name, role: user.role, active: user.active, buyerId: user.buyer_id })),
+        suppliers: suppliers.map(supplier => ({ id: supplier.id, name: supplier.name, buyerId: supplier.buyerId, buyerName: supplier.buyerName, industries: supplier.industries, active: supplier.active }))
+      });
     }
     if (req.method === 'PATCH') {
       if (!sameOrigin(req)) return respond(res, 403, { error: 'Origem nao permitida.' });
@@ -37,7 +46,7 @@ export default async function handler(req, res) {
     }
     if (req.method === 'DELETE') {
       if (!sameOrigin(req)) return respond(res, 403, { error: 'Origem nao permitida.' });
-      const buyer = await requireUser(req, res, ['buyer']);
+      const buyer = await requireUser(req, res, ['buyer', 'admin']);
       if (!buyer) return;
       const body = requestBody(req);
       const rows = await database()`UPDATE app_users SET active = FALSE
@@ -52,7 +61,7 @@ export default async function handler(req, res) {
     const sql = database();
 
     if (body.action === 'supplier') {
-      const buyer = await requireUser(req, res, ['buyer']);
+      const buyer = await requireUser(req, res, ['buyer', 'admin']);
       if (!buyer) return;
       const name = validName(body.name);
       const supplierId = String(body.supplierId || '').trim();

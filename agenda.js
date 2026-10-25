@@ -723,8 +723,7 @@ function icon(n, cls) { return `<svg class="ic ${cls || ''}" viewBox="0 0 24 24"
 
 const NAV = [
   { grupo: 'Minha rotina', itens: [['hoje', 'Rotina de hoje'], ['agendamentos', 'Agendamentos'], ['cronograma', 'Cronograma'], ['fornecedores', 'Área do fornecedor']] },
-  { grupo: 'Cadastros e ferramentas', itens: [['laboratorios', 'Meus laboratórios']] },
-  { grupo: 'Sistema', itens: [['dados', 'Backup e configurações']] }
+  { grupo: 'Cadastros e ferramentas', itens: [['laboratorios', 'Meus laboratórios']] }
 ];
 const VIEWS = {};
 
@@ -739,16 +738,20 @@ const App = {
     await DB.open();
     Sync.init();
     await Auth.gate();
-    if (!Cloud.user || !['buyer', 'admin'].includes(Cloud.user.role)) return;
-    if (Cloud.user.role === 'buyer') {
-      await Engine.seedIfEmpty();
-      await Cloud.queueBulk('config', DB.all('config'));
-    }
+    if (!Cloud.isBuyer()) return;
+    await Engine.seedIfEmpty();
+    await Cloud.queueBulk('config', DB.all('config'));
     await Backup.init();
     this.buildChrome();
     Auth.paintUser();
     // '@sync' = dados recarregados de outra aba: só redesenha (não grava de novo, evita laço entre abas)
-    DB.onChange(store => { Engine.invalidate(); if (store !== '@sync') { Backup.schedule(); if (Cloud.user?.role !== 'buyer') Share.agendarPublicar(); } this.renderSoon(); });
+    DB.onChange(store => {
+      Engine.invalidate();
+      if (store !== '@sync') { Backup.schedule(); if (!Cloud.isBuyer()) Share.agendarPublicar(); }
+      // Contas de acesso nao depende dos dados sincronizados: redesenhar apagaria o formulario em edicao
+      if (store === '@sync' && this.view === 'usuarios') { this.refreshChrome(); return; }
+      this.renderSoon();
+    });
     this.started = true;
     window.addEventListener('hashchange', () => this.fromHash());
     document.addEventListener('click', e => this.onClick(e));
@@ -762,7 +765,7 @@ const App = {
   fromHash() {
     const h = decodeURIComponent(location.hash.slice(1));
     const [v, q] = h.split('?');
-    this.view = Cloud.user?.role === 'admin' ? 'dados' : VIEWS[v] ? v : 'hoje';
+    this.view = VIEWS[v] && (v !== 'usuarios' || Cloud.user?.role === 'admin') ? v : 'hoje';
     this.params = Object.fromEntries(new URLSearchParams(q || ''));
     if (this.params.f) { // aplica filtro vindo de um link
       const st = this.s(this.view);
@@ -780,20 +783,13 @@ const App = {
 
   buildChrome() {
     const adminMode = Cloud.user?.role === 'admin';
-    const groups = adminMode ? [{ grupo: 'Administração', itens: [['dados', 'Contas de acesso']] }] : NAV;
+    const groups = adminMode ? NAV.concat([{ grupo: 'Administração', itens: [['usuarios', 'Contas de acesso']] }]) : NAV;
     const nav = groups.map(g => `<div class="nav-group"><div class="nav-title">${g.grupo}</div>${g.itens.map(([k, t]) =>
-      `<a href="#${k}" class="nav-item" data-view="${k}">${icon(k)}<span>${t}</span><b class="nav-count" id="nc-${k}"></b></a>`).join('')}</div>`).join('');
+      `<a href="#${k}" class="nav-item" data-view="${k}">${icon(k === 'usuarios' ? 'fornecedores' : k)}<span>${t}</span><b class="nav-count" id="nc-${k}"></b></a>`).join('')}</div>`).join('');
     document.getElementById('nav').innerHTML = nav;
-    document.getElementById('bottomnav').innerHTML = (adminMode ? [] : [['hoje', 'Hoje'], ['agendamentos', 'Agenda'], ['cronograma', 'Cronograma'], ['fornecedores', 'Fornecedor']]).map(([k, t]) =>
+    document.getElementById('bottomnav').innerHTML = [['hoje', 'Hoje'], ['agendamentos', 'Agenda'], ['cronograma', 'Cronograma'], ['fornecedores', 'Fornecedor']].map(([k, t]) =>
       `<a href="#${k}" data-view="${k}">${icon(k)}<span>${t}</span></a>`).join('') + `<a data-act="toggle-nav">${icon('menu')}<span>Menu</span></a>`;
     const si = document.getElementById('gsearch');
-    if (adminMode) {
-      si.parentElement.hidden = true;
-      document.getElementById('alertBtn').hidden = true;
-      document.querySelector('[data-act="new-demanda"]').hidden = true;
-      document.getElementById('backupStatus').hidden = true;
-      document.getElementById('shareStatus').hidden = true;
-    }
     si.addEventListener('input', debounce(() => this.quickSearch(si.value), 150));
     si.addEventListener('keydown', e => { if (e.key === 'Enter' && si.value.trim()) { this.go('busca', { q: si.value.trim() }); this.hideQuick(); } if (e.key === 'Escape') this.hideQuick(); });
     si.addEventListener('blur', () => setTimeout(() => this.hideQuick(), 200));
@@ -833,9 +829,19 @@ const App = {
     const main = document.getElementById('main');
     const scroll = main.scrollTop;
     const sameView = main.dataset.view === this.view;
+    // preserva o que ja foi digitado em formularios quando a mesma tela e redesenhada
+    const drafts = sameView ? Array.from(main.querySelectorAll('form[id] [name]')).filter(el => el.type !== 'file')
+      .map(el => ({ form: el.form && el.form.id, name: el.name, value: el.value, checked: el.checked, radio: el.type === 'radio', focus: el === document.activeElement })) : [];
     try {
       main.innerHTML = v.render(this.s(this.view), this.params);
       if (v.mount) v.mount(this.s(this.view), main);
+      drafts.forEach(d => {
+        const sel = `#${CSS.escape(d.form)} [name="${CSS.escape(d.name)}"]` + (d.radio ? `[value="${CSS.escape(d.value)}"]` : '');
+        const el = d.form && main.querySelector(sel);
+        if (!el) return;
+        if (el.type === 'checkbox' || el.type === 'radio') el.checked = d.checked; else el.value = d.value;
+        if (d.focus) el.focus();
+      });
     } catch (e) {
       console.error(e);
       main.innerHTML = `<div class="card"><h3>Erro ao exibir esta tela</h3><pre class="err">${esc(e.stack || e)}</pre></div>`;
@@ -856,7 +862,6 @@ const App = {
     if (fn) { e.preventDefault(); fn(el.dataset, el, e); }
   },
   onKey(e) {
-    if (Cloud.user?.role === 'admin') return;
     if (e.target.matches('input,textarea,select')) return;
     if (document.body.classList.contains('locked')) return;
     if (document.querySelector('.modal-bg')) return;
@@ -1769,17 +1774,6 @@ async function doImport(tkey, rows, mode) {
 VIEWS.dados = {
   title: 'Backup e configurações',
   render() {
-    if (Cloud.user?.role === 'admin') {
-      return pageHead('Contas de acesso', 'Crie os acessos da equipe e desative contas que não devem mais entrar.') +
-        `<div class="cols2"><div class="card"><h3>Novo acesso interno</h3><form class="grid-form" id="adminUserForm" onsubmit="return false">
-          <div class="fld span2"><label>Nome</label><input name="name" required></div>
-          <div class="fld span2"><label>Usuário</label><input name="username" autocomplete="off" required></div>
-          <div class="fld span2"><label>Perfil</label><select name="role"><option value="buyer">Comprador</option><option value="reception">Recepção</option></select></div>
-          <div class="fld span2"><label>Senha inicial (mínimo 10 caracteres)</label><input type="password" name="password" minlength="10" required></div>
-          <div class="page-actions span4">${btn(icon('plus') + ' Criar acesso', 'admin-user-add', '', 'primary')}</div>
-        </form></div><div class="card"><div class="card-h"><h3>Usuários cadastrados</h3><button class="icon-btn" data-act="admin-user-refresh" title="Atualizar">${icon('refresh')}</button></div><div id="adminUsers"><p class="muted small">Carregando contas…</p></div></div></div>
-        <div class="card"><h3>Fornecedor</h3><p class="small muted">O comprador gera e compartilha um código individual pela área de fornecedores. O código pode ser revogado ou substituído.</p></div>`;
-    }
     const b = Backup.status();
     const last = DB.cfg('backupLast', null);
     const p = P();
@@ -1797,7 +1791,7 @@ VIEWS.dados = {
             <p class="small muted">Último backup: ${last ? fmtDateTime(last) : 'nunca'}</p>
           </div>
         </div></div>
-      ${Cloud.user?.role === 'buyer' ? '' : shareCardHTML()}
+      ${Cloud.isBuyer() ? '' : shareCardHTML()}
       ${Cloud.user ? `<div class="card"><h3>Conta</h3><p class="small muted">Acesso como <b>${esc(Cloud.user.name)}</b> (${esc(Cloud.user.username)}). Para alterar a senha, solicite ao administrador da agenda.</p></div>` : authCardHTML()}
       <div class="card"><h3>Preferências</h3><form class="grid-form" id="cfgForm" onsubmit="return false">
         <div class="fld span2"><label>Seu nome (saudação)</label><input name="nomeUsuario" value="${esc(p.nomeUsuario)}"></div>
@@ -1812,7 +1806,6 @@ VIEWS.dados = {
         <p class="small muted">Versão ${APP_VERSION} · banco local: ${DB.memoryOnly ? '<b class="c-bad">indisponível (dados não estão sendo salvos)</b>' : 'ativo'}</p></div>`;
   },
   mount(st, main) {
-    if (Cloud.user?.role === 'admin') { ACTIONS['admin-user-refresh']({}); return; }
     authCardMount(main);
     const f = main.querySelector('#restoreFile');
     if (f) f.addEventListener('change', async () => {
@@ -1823,22 +1816,54 @@ VIEWS.dados = {
     });
   }
 };
+/* ---------------- CONTAS DE ACESSO (ADMINISTRAÇÃO) ---------------- */
+VIEWS.usuarios = {
+  title: 'Contas de acesso',
+  render() {
+    return pageHead('Contas de acesso', 'Crie os acessos da equipe e desative contas que não devem mais entrar.') +
+      `<div class="cols2"><div class="card"><h3>Novo acesso interno</h3><form class="grid-form" id="adminUserForm" onsubmit="return false">
+          <div class="fld span2"><label>Nome</label><input name="name" required></div>
+          <div class="fld span2"><label>Usuário</label><input name="username" autocomplete="off" required></div>
+          <div class="fld span2"><label>Perfil</label><select name="role"><option value="buyer">Comprador</option><option value="reception">Recepção</option></select></div>
+          <div class="fld span2"><label>Senha inicial (mínimo 10 caracteres)</label><input type="password" name="password" minlength="10" autocomplete="new-password" required></div>
+          <div class="page-actions span4">${btn(icon('plus') + ' Criar acesso', 'admin-user-add', '', 'primary')}</div>
+        </form></div><div class="card"><div class="card-h"><h3>Usuários cadastrados</h3><button class="icon-btn" data-act="admin-user-refresh" title="Atualizar">${icon('refresh')}</button></div><div id="adminUsers"><p class="muted small">Carregando contas…</p></div></div>
+        <div class="card"><div class="card-h"><h3>Fornecedores de todos os compradores</h3><button class="icon-btn" data-act="admin-user-refresh" title="Atualizar">${icon('refresh')}</button></div><div id="adminSuppliers"><p class="muted small">Carregando fornecedores…</p></div></div></div>`;
+  },
+  mount() { ACTIONS['admin-user-refresh']({}); }
+};
 ACTIONS['admin-user-refresh'] = async () => {
-  const target = document.getElementById('adminUsers'); if (!target) return;
-  target.innerHTML = '<p class="muted small">Carregando contas…</p>';
+  const target = document.getElementById('adminUsers');
+  const supplierTarget = document.getElementById('adminSuppliers');
+  if (!target && !supplierTarget) return;
+  if (target) target.innerHTML = '<p class="muted small">Carregando contas…</p>';
+  if (supplierTarget) supplierTarget.innerHTML = '<p class="muted small">Carregando fornecedores…</p>';
   try {
-    const { users } = await Cloud.request('/api/users');
-    target.innerHTML = users.length ? `<div class="tbl-wrap"><table class="tbl dense"><thead><tr><th>Nome</th><th>Usuário</th><th>Perfil</th><th>Estado</th><th></th></tr></thead><tbody>${users.map(user => `<tr><td>${esc(user.name)}</td><td>${esc(user.username)}</td><td>${esc(user.role)}</td><td>${user.active ? 'Ativo' : 'Inativo'}</td><td>${user.id === Cloud.user.id ? '' : `${user.active && user.role !== 'supplier' ? `<button class="btn xs" data-act="admin-user-password" data-id="${esc(user.id)}" data-name="${esc(user.name)}">Redefinir senha</button> ` : ''}<button class="btn xs ${user.active ? 'danger ghost' : ''}" data-act="admin-user-toggle" data-id="${esc(user.id)}" data-active="${user.active ? '0' : '1'}">${user.active ? 'Desativar' : 'Ativar'}</button>`}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">Nenhuma conta cadastrada.</p>';
-  } catch (error) { target.innerHTML = `<p class="c-bad small">${esc(error.message)}</p>`; }
+    const { users, suppliers } = await Cloud.request('/api/users');
+    if (target) target.innerHTML = users.length ? `<div class="tbl-wrap"><table class="tbl dense"><thead><tr><th>Nome</th><th>Usuário</th><th>Perfil</th><th>Estado</th><th></th></tr></thead><tbody>${users.map(user => `<tr><td>${esc(user.name)}</td><td>${esc(user.username)}</td><td>${esc(user.role)}</td><td>${user.active ? 'Ativo' : 'Inativo'}</td><td>${user.id === Cloud.user.id ? '' : `${user.active && user.role !== 'supplier' ? `<button class="btn xs" data-act="admin-user-password" data-id="${esc(user.id)}" data-name="${esc(user.name)}">Redefinir senha</button> ` : ''}<button class="btn xs ${user.active ? 'danger ghost' : ''}" data-act="admin-user-toggle" data-id="${esc(user.id)}" data-active="${user.active ? '0' : '1'}">${user.active ? 'Desativar' : 'Ativar'}</button>`}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">Nenhuma conta cadastrada.</p>';
+    if (supplierTarget) supplierTarget.innerHTML = suppliers.length ? `<div class="tbl-wrap"><table class="tbl dense"><thead><tr><th>Fornecedor</th><th>Comprador responsável</th><th>Indústrias</th><th>Estado</th></tr></thead><tbody>${suppliers.map(supplier => {
+      const industries = Array.isArray(supplier.industries) ? supplier.industries.map(item => typeof item === 'string' ? item : item.nome || '').filter(Boolean).join(', ') : '';
+      return `<tr><td>${esc(supplier.name)}</td><td>${esc(supplier.buyerName)}</td><td>${esc(industries || '—')}</td><td>${supplier.active ? 'Ativo' : 'Inativo'}</td></tr>`;
+    }).join('')}</tbody></table></div>` : '<p class="muted small">Nenhum fornecedor cadastrado.</p>';
+  } catch (error) {
+    if (target) target.innerHTML = `<p class="c-bad small">${esc(error.message)}</p>`;
+    if (supplierTarget) supplierTarget.innerHTML = `<p class="c-bad small">${esc(error.message)}</p>`;
+  }
 };
 ACTIONS['admin-user-add'] = async () => {
   const form = document.getElementById('adminUserForm'); if (!form) return;
+  const button = form.querySelector('[data-act="admin-user-add"]');
+  if (!button || button.disabled) return;
+  const originalLabel = button.innerHTML;
+  button.disabled = true;
+  button.textContent = 'Salvando…';
   const data = Object.fromEntries(new FormData(form));
   try {
     await Cloud.request('/api/users', { method: 'POST', body: data });
     form.reset(); toast('Acesso criado.', 'ok');
     await ACTIONS['admin-user-refresh']({});
   } catch (error) { toast(error.message, 'err'); }
+  finally { if (button.isConnected) { button.innerHTML = originalLabel; button.disabled = false; } }
 };
 ACTIONS['admin-user-toggle'] = async data => {
   const active = data.active === '1';
@@ -2236,7 +2261,7 @@ const Auth = {
     if (!el) { el = document.createElement('div'); el.id = 'auth'; document.body.appendChild(el); }
     const a = this.cfg();
     if ((this.role === 'forn' || this.role === 'recep') && (mode === 'login' || mode === 'setup')) mode = this.role;
-    const roleSw = ['login', 'setup', 'forn', 'recep'].includes(mode) ? `<div class="au-role">${[['comp', 'COMPRADOR'], ['forn', 'FORNECEDOR'], ['recep', 'RECEPÇÃO'], ['admin', 'ADMIN']].map(([k, l]) => `<button type="button" data-au-role="${k}" class="${(k === this.role ? 'on' : '')}">${l}</button>`).join('')}</div>` : '';
+    const roleSw = ['login', 'setup', 'forn', 'recep'].includes(mode) ? `<div class="au-role">${[['comp', 'COMPRADOR'], ['forn', 'FORNECEDOR'], ['recep', 'RECEPÇÃO']].map(([k, l]) => `<button type="button" data-au-role="${k}" class="${(k === this.role ? 'on' : '')}">${l}</button>`).join('')}</div>` : '';
     const eye = `<button type="button" class="au-eye" tabindex="-1" title="Mostrar/ocultar senha">${icon('eye')}</button>`;
     const pw = (name, label, ac) => `<label class="au-f"><span>${label}</span><div class="au-pw"><input type="password" name="${name}" autocomplete="${ac}" required>${eye}</div></label>`;
     const head = (t, s) => `<img class="au-logo" src="${document.getElementById('appIcon').src}" alt=""><h1>${t}</h1><p class="au-sub">${s}</p>`;
@@ -2349,11 +2374,11 @@ const Auth = {
         }
         // login
         if (Date.now() < this.blockUntil) return msg('Muitas tentativas erradas. Aguarde ' + Math.ceil((this.blockUntil - Date.now()) / 1000) + 's.');
-        const roles = { comp: 'buyer', admin: 'admin' };
+        const roles = { comp: 'buyer' };
         try {
           const user = await Cloud.login({ role: roles[this.role] || 'buyer', username: v('usuario'), password: v('senha') });
           await Cloud.activate(user);
-          if (user.role === 'buyer') Aviso.pedirPermissao();
+          if (Cloud.isBuyer(user)) Aviso.pedirPermissao();
         } catch (error) {
           this.falhou();
           f.querySelector('[name=senha]').value = '';
@@ -3149,7 +3174,7 @@ VIEWS.fornecedores = {
   render(s) {
     const tab = s.tab || 'agenda';
     const tabs = `<div class="tabs">${[['agenda', 'Atendimentos'], ['horarios', 'Horários de atendimento'], ['bloqueios', 'Dias bloqueados'], ['cadastro', 'Fornecedores e códigos']].map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-act="fo-tab" data-t="${k}">${l}</button>`).join('')}</div>`;
-    const legacyShare = Cloud.user?.role === 'buyer' ? '' : (Share.ok() ? btn(icon('folder') + ' Recepção conectada', 'go', 'data-view="dados"', 'sm') : btn(icon('folder') + (Share.dir ? ' Reconectar recepção' : ' Conectar com a recepção'), Share.dir ? 'share-conectar' : 'share-escolher', '', 'sm warn'));
+    const legacyShare = Cloud.isBuyer() ? '' : (Share.ok() ? btn(icon('folder') + ' Recepção conectada', 'go', 'data-view="dados"', 'sm') : btn(icon('folder') + (Share.dir ? ' Reconectar recepção' : ' Conectar com a recepção'), Share.dir ? 'share-conectar' : 'share-escolher', '', 'sm warn'));
     const head = pageHead('Área do fornecedor', 'Os fornecedores entram com o código individual emitido pelo comprador; os atendimentos são compartilhados com a recepção.', legacyShare + ' ' + btn(icon('plus') + ' Novo atendimento', 'fo-novo', `data-data="${s.dia || ''}"`, 'primary'));
     return head + tabs + this[tab](s);
   },
@@ -3205,7 +3230,7 @@ VIEWS.fornecedores = {
       <div class="card"><h3>Acesso da recepção</h3><p class="muted small">O administrador cria o acesso individual da recepção. O painel mostra os atendimentos compartilhados e permite registrar chegada, início e finalização.</p></div>
       <div class="card flush"><div class="card-h pad"><h3>Fornecedores cadastrados</h3><span class="pill">${L.length}</span></div>
       ${L.length ? `<div class="fo-list">${L.map(f => {
-        const code = Cloud.user?.role === 'buyer' ? Cloud.supplierCodes.get(f.id) : f.codigo;
+        const code = Cloud.isBuyer() ? Cloud.supplierCodes.get(f.id) : f.codigo;
         return `<div class="fo-li"><div><b>${esc(f.nome)}</b>${Forn.inds(f).length ? `<div class="ind-list sm">${Forn.inds(f).map(i => `<span class="ind-chip">${esc(i.nome)}</span>`).join('')}</div>` : '<span>sem indústria</span>'}<small>${Forn.doFornecedor(f.id).length} atendimento(s) futuros</small></div>
           <span class="fo-cod mono">${code ? esc(code) : 'Convite nao gerado'}</span><button class="btn xs" data-act="fo-cad-edit" data-id="${f.id}">${icon('edit')} Indústrias</button>${code ? `<button class="btn xs" data-act="fo-cad-copy" data-id="${f.id}" data-c="${esc(code)}">Copiar</button>` : ''}<button class="btn xs" data-act="fo-cad-new" data-id="${f.id}">${code ? 'Novo código' : 'Gerar convite'}</button><button class="icon-btn" data-act="fo-cad-del" data-id="${f.id}" title="Remover">${icon('trash')}</button></div>`;
       }).join('')}</div>` : '<p class="muted small pad">Nenhum fornecedor cadastrado ainda.</p>'}</div>`;
@@ -3265,10 +3290,10 @@ ACTIONS['fo-cad-add'] = async () => {
   const f = document.getElementById('foCad'), nome = f.querySelector('[name=nome]').value.trim();
   if (!nome) return toast('Informe o nome do fornecedor.', 'warn');
   let codigo = '';
-  if (Cloud.user?.role !== 'buyer') { do codigo = Forn.novoCodigo(); while (Forn.porCodigo(codigo)); }
+  if (!Cloud.isBuyer()) { do codigo = Forn.novoCodigo(); while (Forn.porCodigo(codigo)); }
   const novo = { id: uid(), nome, industrias: Forn.pickerValue(f), codigo, comprador: (Auth.cfg() || {}).usuario || '', criadoEm: new Date().toISOString() };
   await DB.setCfg('fornecedores', DB.cfg('fornecedores', []).concat([novo]));
-  if (Cloud.user?.role === 'buyer') {
+  if (Cloud.isBuyer()) {
     try {
       const invite = await Cloud.request('/api/users', { method: 'POST', body: { action: 'supplier', supplierId: novo.id, name: novo.nome } });
       Cloud.supplierCodes.set(novo.id, invite.code);
@@ -3285,14 +3310,14 @@ ACTIONS['fo-cad-copy'] = async d => {
 ACTIONS['fo-cad-new'] = async d => {
   if (!await confirmBox('Gerar um novo código? O código antigo deixa de funcionar.', 'Gerar novo código')) return;
   let codigo;
-  if (Cloud.user?.role === 'buyer') {
+  if (Cloud.isBuyer()) {
     const supplier = Forn.get(d.id); if (!supplier) return;
     try {
       const invite = await Cloud.request('/api/users', { method: 'POST', body: { action: 'supplier', supplierId: supplier.id, name: supplier.nome } });
       codigo = invite.code;
     } catch (error) { return toast('Não foi possível renovar o código: ' + error.message, 'err'); }
   } else { do codigo = Forn.novoCodigo(); while (Forn.porCodigo(codigo)); }
-  if (Cloud.user?.role === 'buyer') {
+  if (Cloud.isBuyer()) {
     Cloud.supplierCodes.set(d.id, codigo);
     App.render();
   } else await DB.setCfg('fornecedores', DB.cfg('fornecedores', []).map(f => f.id === d.id ? Object.assign({}, f, { codigo }) : f));
@@ -3313,7 +3338,7 @@ ACTIONS['fo-recep-padrao'] = async () => {
 ACTIONS['fo-cad-del'] = async d => {
   const f = Forn.get(d.id); if (!f) return;
   if (!await confirmBox('Remover ' + f.nome + '? O código dele deixa de funcionar (os atendimentos já agendados continuam na agenda).', 'Remover', true)) return;
-  if (Cloud.user?.role === 'buyer') {
+  if (Cloud.isBuyer()) {
     try { await Cloud.request('/api/users', { method: 'DELETE', body: { supplierId: f.id } }); }
     catch (error) { return toast('Não foi possível revogar o acesso: ' + error.message, 'err'); }
   }
