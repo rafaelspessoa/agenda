@@ -29,6 +29,7 @@ Para desenvolvimento, instale uma Vercel CLI atual fora das dependencias do proj
 - Senhas internas sao armazenadas com `scrypt`; sessoes ficam em cookies `HttpOnly`, `SameSite=Lax` e `Secure` em producao. Tentativas falhas sao limitadas no servidor.
 - Cada comprador so le e grava seus proprios registros. A recepcao recebe uma projecao limitada aos campos de atendimento. O fornecedor ve apenas os horarios e atendimentos vinculados ao seu cadastro; reservas e conflitos sao validados no servidor.
 - A interface mantem IndexedDB como cache e pode oferecer a importacao inicial dos dados locais apos o primeiro login do comprador. O PostgreSQL e a fonte compartilhada entre computadores.
+- Retencao automatica (pg_cron, a cada hora, funcao `cleanup_agenda_records`): agendamentos finalizados (concluidos, cancelados ou com atendimento finalizado) sao excluidos 5 dias apos a finalizacao; agendamentos pendentes que nunca foram iniciados sao excluidos 2 dias apos a data agendada. Agendamentos repetitivos nao entram na regra dos pendentes.
 - Backups locais existentes continuam disponiveis; planeje tambem backup e restauracao do banco PostgreSQL. A pasta compartilhada antiga nao e usada no fluxo cloud.
 - HTTPS e obrigatorio para o uso externo. Restrinja as contas administrativas, desative usuarios desligados e nao reutilize codigos de fornecedor.
 

@@ -190,6 +190,57 @@ ON CONFLICT (buyer_id, appointment_id) DO UPDATE SET
   payload = EXCLUDED.payload,
   updated_at = NOW();
 
+-- Retenção de agendamentos (para o banco não crescer sem limite):
+--   * finalizados (concluídos, cancelados ou com atendimento finalizado): 5 dias após a finalização;
+--   * pendentes que nunca foram iniciados: 2 dias após a data agendada.
+--   Agendamentos repetitivos não entram na regra dos pendentes (a repetição seria perdida).
+--   A exclusão em app_records também remove a linha de appointments (gatilho acima).
+CREATE OR REPLACE FUNCTION public.agenda_ts(value TEXT)
+RETURNS TIMESTAMPTZ
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT CASE WHEN value ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}' THEN value::timestamptz END
+$$;
+
+CREATE OR REPLACE FUNCTION public.cleanup_agenda_records()
+RETURNS INTEGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  removed INTEGER;
+  today DATE := (NOW() AT TIME ZONE 'America/Sao_Paulo')::date;
+BEGIN
+  DELETE FROM app_records r
+  WHERE r.store = 'demandas' AND (
+    (
+      (COALESCE(r.payload->>'status', '') IN ('Concluído', 'Cancelado') OR COALESCE(r.payload->>'finalizouEm', '') <> '')
+      AND COALESCE(public.agenda_ts(r.payload->>'concluidoEm'), public.agenda_ts(r.payload->>'finalizouEm'), r.updated_at) < NOW() - INTERVAL '5 days'
+    ) OR (
+      COALESCE(r.payload->>'status', '') NOT IN ('Concluído', 'Cancelado')
+      AND COALESCE(r.payload->>'finalizouEm', '') = ''
+      AND COALESCE(r.payload->>'iniciouEm', '') = ''
+      AND COALESCE(NULLIF(r.payload->'recorrencia'->>'tipo', ''), 'nenhuma') = 'nenhuma'
+      AND COALESCE(r.payload->>'data', '') ~ '^\d{4}-\d{2}-\d{2}$'
+      AND (r.payload->>'data')::date < today - 2
+    )
+  );
+  GET DIAGNOSTICS removed = ROW_COUNT;
+  RETURN removed;
+END;
+$$;
+
+-- roda a limpeza a cada hora no próprio banco (pg_cron do Supabase)
+DO $$
+BEGIN
+  CREATE EXTENSION IF NOT EXISTS pg_cron;
+  PERFORM cron.unschedule(jobid) FROM cron.job WHERE jobname = 'agenda-limpeza';
+  PERFORM cron.schedule('agenda-limpeza', '15 * * * *', 'SELECT public.cleanup_agenda_records()');
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'pg_cron indisponivel; a limpeza automatica nao foi agendada: %', SQLERRM;
+END;
+$$;
+
 ALTER TABLE app_users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app_login_limits ENABLE ROW LEVEL SECURITY;
