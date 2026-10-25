@@ -28,10 +28,10 @@ try {
     WHERE table_schema = 'public'
       AND table_name = ANY($1::text[])
     ORDER BY table_name
-  `, [['app_users', 'app_sessions', 'app_login_limits', 'app_records', 'suppliers', 'appointments']]);
+  `, [['app_users', 'app_sessions', 'app_login_limits', 'app_records', 'suppliers', 'appointments', 'labs', 'lab_buyers']]);
 
   const tables = result.rows.map(row => row.table_name);
-  if (tables.length !== 6) throw new Error('O esquema foi executado, mas nem todas as tabelas esperadas foram encontradas.');
+  if (tables.length !== 8) throw new Error('O esquema foi executado, mas nem todas as tabelas esperadas foram encontradas.');
   console.log('Conexao Supabase validada. Tabelas prontas: ' + tables.join(', '));
 } finally {
   await pool.end();

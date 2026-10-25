@@ -2,7 +2,8 @@ import { database } from './_db.js';
 import { clientId, notify, topics } from './_realtime.js';
 import { requireUser, requestBody, respond, sameOrigin } from './_security.js';
 
-const STORES = new Set(['demandas', 'laboratorios', 'compras', 'historico', 'produtos', 'estoque', 'vendas', 'fornecedores', 'filiais', 'pedidos', 'config']);
+// laboratórios ficam na tabela compartilhada labs (api/labs.js), não mais por comprador
+const STORES = new Set(['demandas', 'compras', 'historico', 'produtos', 'estoque', 'vendas', 'fornecedores', 'filiais', 'pedidos', 'config']);
 const LOCAL_CONFIG = new Set(['auth', 'recepAuth', 'cloudOwner', 'backupDir', 'backupLast', 'backupLastFile', 'shareDir']);
 
 export default async function handler(req, res) {

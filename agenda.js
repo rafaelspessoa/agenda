@@ -741,8 +741,8 @@ const ICONS = {
 function icon(n, cls) { return `<svg class="ic ${cls || ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[n] || ''}</svg>`; }
 
 const NAV = [
-  { grupo: 'Minha rotina', itens: [['hoje', 'Rotina de hoje'], ['agendamentos', 'Agendamentos'], ['cronograma', 'Cronograma'], ['fornecedores', 'Área do fornecedor']] },
-  { grupo: 'Cadastros e ferramentas', itens: [['laboratorios', 'Meus laboratórios']] }
+  { grupo: 'Minha rotina', itens: [['hoje', 'Rotina de hoje'], ['agendamentos', 'Agendamentos'], ['cronograma', 'Cronograma'], ['fornecedores', 'Atendimentos']] },
+  { grupo: 'Cadastros e ferramentas', itens: [['laboratorios', 'Laboratórios']] }
 ];
 const VIEWS = {};
 
@@ -817,7 +817,7 @@ const App = {
 
   buildChrome() {
     this.buildNav();
-    document.getElementById('bottomnav').innerHTML = [['hoje', 'Hoje'], ['agendamentos', 'Agenda'], ['cronograma', 'Cronograma'], ['fornecedores', 'Fornecedor']].map(([k, t]) =>
+    document.getElementById('bottomnav').innerHTML = [['hoje', 'Hoje'], ['agendamentos', 'Agenda'], ['cronograma', 'Cronograma'], ['fornecedores', 'Atend.']].map(([k, t]) =>
       `<a href="#${k}" data-view="${k}">${icon(k)}<span>${t}</span></a>`).join('') + `<a data-act="toggle-nav">${icon('menu')}<span>Menu</span></a>`;
     const si = document.getElementById('gsearch');
     si.addEventListener('input', debounce(() => this.quickSearch(si.value), 150));
@@ -1064,9 +1064,9 @@ function mountLabPick(root) {
     };
     const mostrarTodos = () => { res = Engine.labsAtivos(); todos = true; sel = res.length ? 0 : -1; show(); };
     const show = () => {
-      if (!Engine.labsAtivos().length) { list.innerHTML = '<div class="lp-none">Nenhum laboratório cadastrado ainda. Cadastre em <a href="#laboratorios">Meus laboratórios</a>.</div>'; list.hidden = false; return; }
+      if (!Engine.labsAtivos().length) { list.innerHTML = '<div class="lp-none">Nenhum laboratório cadastrado ainda. Cadastre em <a href="#laboratorios">Laboratórios</a>.</div>'; list.hidden = false; return; }
       list.innerHTML = (todos && res.length ? `<div class="lp-head">${res.length} laboratório(s) cadastrado(s) — digite para filtrar</div>` : '') + (res.length ? res.map((l, i) => `<div class="lp-opt ${i === sel ? 'on' : ''}" data-i="${i}"><b>${esc(l.codigo || '—')}</b><span>${esc(l.nome)}</span>${l.uf ? `<em>${esc(l.uf)}</em>` : ''}${l.representante ? `<small>${esc(l.representante)}</small>` : ''}</div>`).join('')
-        : `<div class="lp-none">${only ? 'Não está em Meus laboratórios. Confira o código ou cadastre primeiro em <a href="#laboratorios">Meus laboratórios</a>.' : 'Nenhum laboratório encontrado — clique em + para cadastrar'}</div>`);
+        : `<div class="lp-none">${only ? 'Não está em Laboratórios. Confira o código ou cadastre primeiro em <a href="#laboratorios">Laboratórios</a>.' : 'Nenhum laboratório encontrado — clique em + para cadastrar'}</div>`);
       list.hidden = false;
     };
     const pick = l => { labPickSet(box, l); };
@@ -1097,7 +1097,7 @@ function mountLabPick(root) {
       list.hidden = true;
       if (!hid.value && (cod.value.trim() || nome.value.trim())) {
         if (res.length === 1) pick(res[0]);
-        else if (msg) msg.innerHTML = `<span class="c-bad">${only ? 'Escolha uma indústria cadastrada em Meus laboratórios.' : 'Selecione um laboratório da lista (ou cadastre no +).'}</span>`;
+        else if (msg) msg.innerHTML = `<span class="c-bad">${only ? 'Escolha uma indústria cadastrada em Laboratórios.' : 'Selecione um laboratório da lista (ou cadastre no +).'}</span>`;
       }
     }, 150);
     cod.addEventListener('blur', blur); nome.addEventListener('blur', blur);
@@ -1208,9 +1208,11 @@ function formCancelar(id) {
 }
 
 /* ---------------- LABORATÓRIO ---------------- */
+// laboratórios são da empresa: comprador cadastra; só o administrador edita ou exclui
+function podeEditarLab() { return !Cloud.user || Cloud.user.role === 'admin'; }
 function labFields() {
   return [
-    { k: 'codigo', label: 'Código', span: 1, ph: 'Ex.: 1234' },
+    { k: 'codigo', label: 'Código (acesso do laboratório)', req: true, span: 1, ph: 'Ex.: 1234' },
     { k: 'nome', label: 'Laboratório', req: true, span: 2 },
     { k: 'uf', label: 'Estado (UF)', type: 'select', options: UFS, blank: '—', span: 1 },
     { k: 'representante', label: 'Representante', span: 2, ph: 'Nome do representante' },
@@ -1223,21 +1225,42 @@ function formLab(id, onSaved, preset) {
   const l = antigo ? Object.assign({}, antigo) : Object.assign({}, preset || {});
   const fields = labFields();
   const pend = antigo ? sortBy(Engine.demandasAbertas().filter(d => d.labId === id), d => d.data || '9999') : [];
+  const soLeitura = !!antigo && !podeEditarLab();
   openModal({
     title: antigo ? antigo.nome : 'Novo laboratório',
     body: formHTML(fields, l) + (antigo ? `<h4>Agendamentos em aberto (${pend.length})</h4>${pend.slice(0, 8).map(d => `<div class="mini-row" data-act="edit-demanda" data-id="${d.id}">${d.hora ? '<b>' + d.hora + '</b> ' : ''}${esc(d.titulo)} <small>${fmtDate(d.data)}${d.hora ? ' ' + d.hora : ''}</small></div>`).join('') || '<p class="muted small">Nenhum.</p>'}
       <button class="btn sm" data-act="new-demanda" data-lab="${id}">${icon('plus')} Agendar para este laboratório</button>` : ''),
-    footer: `${antigo ? `<button class="btn danger ghost" data-del>${icon('trash')} Excluir</button>` : ''}<span class="grow"></span>
+    footer: soLeitura ? `<span class="muted small">Somente o administrador edita ou exclui laboratórios.</span><span class="grow"></span><button class="btn" data-close>Fechar</button>`
+      : `${antigo ? `<button class="btn danger ghost" data-del>${icon('trash')} Excluir</button>` : ''}<span class="grow"></span>
       <button class="btn" data-close>Cancelar</button><button class="btn primary" data-save>Salvar</button>`,
     onMount(el, close) {
       el.querySelectorAll('.modal-b [data-act]').forEach(b => b.addEventListener('click', () => close()));
+      if (soLeitura) { el.querySelectorAll('.grid-form input, .grid-form select, .grid-form textarea').forEach(x => { x.disabled = true; }); return; }
       el.querySelector('[data-save]').addEventListener('click', async () => {
         const v = readForm(el, fields);
         if (!v.nome) { toast('Informe o nome do laboratório.', 'warn'); return; }
+        // o código é o acesso do laboratório à área do fornecedor: obrigatório e sem repetir
+        const cod = Auth.normCode(v.codigo);
+        if (!cod) { toast('Informe o código do laboratório.', 'warn'); el.querySelector('[name=codigo]').focus(); return; }
+        if (cod.length > 32) { toast('O código pode ter no máximo 32 letras ou números.', 'warn'); return; }
+        const dupCod = DB.all('laboratorios').find(x => x.id !== id && Auth.normCode(x.codigo) === cod);
+        if (dupCod) {
+          if (labsComVinculo() && !antigo) { if (await oferecerLabExistente(dupCod)) { close(); if (onSaved) onSaved(DB.get('laboratorios', dupCod.id)); } return; }
+          toast('O código ' + cod + ' já pertence a ' + dupCod.nome + '.', 'warn'); el.querySelector('[name=codigo]').focus(); return;
+        }
         const dup = DB.all('laboratorios').find(x => x.id !== id && (norm(x.nome) === norm(v.nome) && (x.uf || '') === (v.uf || '')));
         if (dup) { toast('Esse laboratório já está cadastrado para este estado.', 'warn'); return; }
         const obj = Object.assign(antigo ? Object.assign({}, antigo) : { id: uid(), criadoEm: new Date().toISOString() }, v, { atualizadoEm: new Date().toISOString() });
-        await DB.put('laboratorios', obj);
+        if (Cloud.isBuyer()) {
+          const bt = el.querySelector('[data-save]'); bt.disabled = true;
+          try { Object.assign(obj, await Cloud.saveLab(obj, !antigo)); }
+          catch (error) {
+            bt.disabled = false;
+            // outro comprador cadastrou o mesmo código há pouco
+            if (error.status === 409 && error.data && error.data.existing && !antigo) { if (await oferecerLabExistente(error.data.existing)) { close(); if (onSaved) onSaved(DB.get('laboratorios', error.data.existing.id)); } return; }
+            toast(error.message, 'err', 7000); return;
+          }
+        } else await DB.put('laboratorios', obj);
         if (!antigo) await log('Laboratório', 'Laboratório cadastrado: ' + Engine.labLabel(obj), { labId: obj.id });
         toast('Laboratório salvo.', 'ok');
         close();
@@ -1246,7 +1269,9 @@ function formLab(id, onSaved, preset) {
       const dl = el.querySelector('[data-del]');
       if (dl) dl.addEventListener('click', async () => {
         const n = DB.all('demandas').filter(d => d.labId === id).length;
-        if (await confirmBox(n ? `Este laboratório tem ${n} agendamento(s) vinculados (eles continuam existindo, sem laboratório). Excluir?` : 'Excluir este laboratório?', 'Excluir', true)) { await DB.del('laboratorios', id); close(); toast('Laboratório excluído.'); }
+        if (await confirmBox(n ? `Este laboratório tem ${n} agendamento(s) vinculados (eles continuam existindo, sem laboratório). Excluir?` : 'Excluir este laboratório?', 'Excluir', true)) {
+          if (Cloud.isBuyer()) { try { await Cloud.deleteLab(id); } catch (error) { return toast(error.message, 'err', 7000); } } else await DB.del('laboratorios', id);
+          close(); toast('Laboratório excluído.'); }
       });
     }
   });
@@ -1607,36 +1632,60 @@ function mountFilters(main, view) {
 ACTIONS['clear-filters'] = d => { const s = App.s(d.view); Object.keys(s).forEach(k => { if (!['sort', 'dir', 'tab'].includes(k)) delete s[k]; }); App.render(); };
 
 /* ---------------- MEUS LABORATÓRIOS ---------------- */
+// na nuvem cada comprador tem os seus (l.meu) dentro da lista única da empresa
+function labsComVinculo() { return Cloud.isBuyer(); }
 function labsFiltrados(st) {
   let arr = DB.all('laboratorios');
+  if (labsComVinculo() && st.meus === '1') arr = arr.filter(l => l.meu);
   if (st.uf) arr = arr.filter(l => l.uf === st.uf);
   if (st.q) arr = arr.filter(l => matchText(l, st.q, ['nome', 'codigo', 'uf', 'obs', 'representante']));
   return sortBy(arr, l => norm(l.nome), l => l.uf || '');
 }
 VIEWS.laboratorios = {
-  title: 'Meus laboratórios',
+  title: 'Laboratórios',
   render(st) {
     const arr = labsFiltrados(st);
     const abertas = Engine.demandasAbertas();
     const ufsUsadas = Array.from(new Set(DB.all('laboratorios').map(l => l.uf).filter(Boolean))).sort();
     const porUF = ufsUsadas.map(u => [u, DB.all('laboratorios').filter(l => l.uf === u).length]);
     const cols = [
-      { k: 'codigo', t: 'Código', f: l => esc(l.codigo || '—'), sv: l => isNaN(+l.codigo) ? (l.codigo || '') : +l.codigo },
+      { k: 'codigo', t: 'Código', f: l => l.codigo ? esc(l.codigo) : '<span class="c-bad">sem código</span>', sv: l => isNaN(+l.codigo) ? (l.codigo || '') : +l.codigo },
       { k: 'nome', t: 'Laboratório', f: l => `<a class="lnk" data-act="edit-lab" data-id="${l.id}"><b>${esc(l.nome)}</b></a>${l.obs ? `<div class="muted small">${esc(l.obs)}</div>` : ''}`, cls: 'wide' },
       { k: 'uf', t: 'Estado', f: l => l.uf ? `<span class="uf">${esc(l.uf)}</span>` : '—' },
       { k: 'representante', t: 'Representante', f: l => esc(l.representante || '—') + (l.telefone ? `<div class="muted small">${esc(l.telefone)}</div>` : '') },
       { k: 'ag', t: 'Agendamentos abertos', num: true, f: l => { const n = abertas.filter(d => d.labId === l.id).length; return n ? `<a data-act="go-lab" data-id="${l.id}">${n}</a>` : '—'; }, sv: l => abertas.filter(d => d.labId === l.id).length },
-      { k: 'a', t: '', nosort: true, f: l => `<div class="row-actions"><button class="btn xs" data-act="new-demanda" data-lab="${l.id}">${icon('plus')} Agendar</button><button class="icon-btn xs" data-act="edit-lab" data-id="${l.id}" title="Editar">${icon('edit')}</button></div>` }
+      { k: 'a', t: '', nosort: true, f: l => `<div class="row-actions">${labsComVinculo() ? (l.meu ? `<span class="pill ok" title="Está nos seus laboratórios">Meu</span><button class="btn xs ghost" data-act="lab-unlink" data-id="${l.id}" title="Remover dos meus laboratórios">Remover dos meus</button>` : `<button class="btn xs" data-act="lab-link" data-id="${l.id}">${icon('plus')} Adicionar aos meus</button>`) : ''}<button class="btn xs" data-act="new-demanda" data-lab="${l.id}">${icon('plus')} Agendar</button>${podeEditarLab() ? `<button class="icon-btn xs" data-act="edit-lab" data-id="${l.id}" title="Editar">${icon('edit')}</button>` : ''}</div>` }
     ];
-    return pageHead('Meus laboratórios', DB.count('laboratorios') + ' laboratório(s) sob minha responsabilidade',
+    return pageHead('Laboratórios', DB.count('laboratorios') + ' laboratório(s) da empresa · o código é o acesso do laboratório à área do fornecedor',
       btn(icon('upload') + ' Importar', 'import', 'data-t="laboratorios"') + btn(icon('download') + ' Exportar', 'exp-labs') + btn(icon('plus') + ' Novo laboratório', 'new-lab', '', 'primary')) +
       (porUF.length ? `<div class="chips">${porUF.map(([u, n]) => `<a class="chip ${st.uf === u ? 'on' : ''}" data-act="lab-uf" data-u="${u}"><b>${n}</b> ${u}</a>`).join('')}${st.uf ? `<a class="chip" data-act="lab-uf" data-u="">Todos</a>` : ''}</div>` : '') +
-      filterBar('laboratorios', st, [fInput('q', st, 'Pesquisar por código, nome, estado ou representante...'), fSelect('uf', st, UFS, 'Estado')]) +
+      filterBar('laboratorios', st, [fInput('q', st, 'Pesquisar por código, nome, estado ou representante...'), fSelect('uf', st, UFS, 'Estado')]
+        .concat(labsComVinculo() ? [fSelect('meus', st, [['1', 'Só os meus (' + DB.all('laboratorios').filter(l => l.meu).length + ')']], 'Todos os laboratórios')] : [])) +
       `<div class="card flush">${table(cols, arr, { view: 'laboratorios', state: st, empty: 'Nenhum laboratório cadastrado. Clique em “Novo laboratório”.' })}</div>`;
   },
   mount(st, main) { mountFilters(main, 'laboratorios'); }
 };
 ACTIONS['lab-uf'] = d => { App.s('laboratorios').uf = d.u; App.render(); };
+// adicionar / remover dos meus laboratórios: o laboratório só agenda com os compradores que o têm
+ACTIONS['lab-link'] = async d => {
+  try { const l = await Cloud.linkLab(d.id, true); toast(l.nome + ' agora está nos seus laboratórios. Ele já pode agendar com você.', 'ok', 6000); }
+  catch (error) { toast(error.message, 'err'); }
+};
+ACTIONS['lab-unlink'] = async d => {
+  const l = DB.get('laboratorios', d.id); if (!l) return;
+  if (!await confirmBox('Remover ' + l.nome + ' dos seus laboratórios? Ele deixa de poder agendar com você (o cadastro continua para os outros compradores).', 'Remover', true)) return;
+  try { await Cloud.linkLab(d.id, false); toast(l.nome + ' removido dos seus laboratórios.', 'ok'); }
+  catch (error) { toast(error.message, 'err'); }
+};
+// código já cadastrado: oferece adicionar o laboratório existente aos meus
+async function oferecerLabExistente(existente) {
+  if (!existente) return false;
+  const l = DB.get('laboratorios', existente.id) || existente;
+  if (l.meu) { toast('O código já é de ' + l.nome + ', que já está nos seus laboratórios.', 'warn', 6000); return false; }
+  if (!await confirmBox('O código ' + (l.codigo || '') + ' já está cadastrado: ' + l.nome + '. Deseja adicionar esse laboratório aos seus?', 'Adicionar aos meus')) return false;
+  try { await Cloud.linkLab(existente.id, true); toast(l.nome + ' adicionado aos seus laboratórios.', 'ok', 6000); return true; }
+  catch (error) { toast(error.message, 'err'); return false; }
+}
 ACTIONS['go-lab'] = d => App.go('agendamentos', { lab: d.id });
 ACTIONS['exp-labs'] = () => exportRows('laboratorios', labsFiltrados(App.s('laboratorios')).map(l => ({ 'Código': l.codigo || '', 'Laboratório': l.nome, 'Estado': l.uf || '', 'Representante': l.representante || '', 'Telefone': l.telefone || '', 'Observações': l.obs || '' })));
 
@@ -1781,6 +1830,13 @@ function importWizard(tkey) {
 }
 async function doImport(tkey, rows, mode) {
   const now = new Date().toISOString();
+  // na nuvem a lista é única: cria os novos (atualizar existentes só o administrador); linhas sem código são ignoradas
+  if (Cloud.isBuyer()) {
+    const r = await Cloud.importLabs(rows.map(r0 => Object.assign({ id: uid(), criadoEm: now }, r0, { uf: normUF(r0.uf) })));
+    if (r.linked) toast(r.linked + ' laboratório(s) já existiam e foram adicionados aos seus' + (podeEditarLab() ? ' (cadastro atualizado)' : '') + '.', 'info', 8000);
+    if (r.skipped) toast(r.skipped + ' linha(s) ignorada(s): sem código ou código repetido na planilha.', 'warn', 9000);
+    return { novos: r.created, atual: r.updated };
+  }
   let novos = 0, atual = 0;
   const existentes = DB.all('laboratorios');
   if (mode === 'replace') { await DB.clear('laboratorios', true); if (Cloud.ready) Cloud.queue('laboratorios', 'clear').catch(() => {}); }
@@ -1858,8 +1914,7 @@ VIEWS.usuarios = {
           <div class="fld span2"><label>Perfil</label><select name="role"><option value="buyer">Comprador</option><option value="reception">Recepção</option></select></div>
           <div class="fld span2"><label>Senha inicial (mínimo 6 caracteres)</label><input type="password" name="password" minlength="6" autocomplete="new-password" required></div>
           <div class="page-actions span4">${btn(icon('plus') + ' Criar acesso', 'admin-user-add', '', 'primary')}</div>
-        </form></div><div class="card"><div class="card-h"><h3>Usuários cadastrados</h3><button class="icon-btn" data-act="admin-user-refresh" title="Atualizar">${icon('refresh')}</button></div><div id="adminUsers">${AdminUsers.usersHTML()}</div></div>
-        <div class="card"><div class="card-h"><h3>Fornecedores de todos os compradores</h3><button class="icon-btn" data-act="admin-user-refresh" title="Atualizar">${icon('refresh')}</button></div><div id="adminSuppliers">${AdminUsers.suppliersHTML()}</div></div></div>`;
+        </form></div><div class="card"><div class="card-h"><h3>Usuários cadastrados</h3><button class="icon-btn" data-act="admin-user-refresh" title="Atualizar">${icon('refresh')}</button></div><div id="adminUsers">${AdminUsers.usersHTML()}</div></div></div>`;
   },
   mount() { ACTIONS['admin-user-refresh']({}); }
 };
@@ -1882,27 +1937,16 @@ const AdminUsers = {
     const perfil = { admin: 'Administrador', buyer: 'Comprador', reception: 'Recepção', supplier: 'Fornecedor' };
     return users.length ? `<div class="tbl-wrap"><table class="tbl dense"><thead><tr><th>Nome</th><th>Usuário</th><th>Perfil</th><th>Estado</th><th></th></tr></thead><tbody>${users.map(user => `<tr><td>${esc(user.name)}</td><td>${esc(user.username)}</td><td>${esc(perfil[user.role] || user.role)}</td><td>${user.active ? 'Ativo' : 'Inativo'}</td><td>${user.id === Cloud.user.id ? '' : `${user.active && user.role !== 'supplier' ? `<button class="btn xs" data-act="admin-user-password" data-id="${esc(user.id)}" data-name="${esc(user.name)}">Redefinir senha</button> ` : ''}<button class="btn xs ${user.active ? 'danger ghost' : ''}" data-act="admin-user-toggle" data-id="${esc(user.id)}" data-active="${user.active ? '0' : '1'}">${user.active ? 'Desativar' : 'Ativar'}</button>`}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">Nenhuma conta cadastrada.</p>';
   },
-  suppliersHTML() {
-    if (this.erro && !this.data) return `<p class="c-bad small">${esc(this.erro)}</p>`;
-    if (!this.data) return '<p class="muted small">Carregando fornecedores…</p>';
-    const { suppliers } = this.data;
-    return suppliers.length ? `<div class="tbl-wrap"><table class="tbl dense"><thead><tr><th>Fornecedor</th><th>Comprador responsável</th><th>Indústrias</th><th>Estado</th></tr></thead><tbody>${suppliers.map(supplier => {
-      const industries = Array.isArray(supplier.industries) ? supplier.industries.map(item => typeof item === 'string' ? item : item.nome || '').filter(Boolean).join(', ') : '';
-      return `<tr><td>${esc(supplier.name)}</td><td>${esc(supplier.buyerName)}</td><td>${esc(industries || '—')}</td><td>${supplier.active ? 'Ativo' : 'Inativo'}</td></tr>`;
-    }).join('')}</tbody></table></div>` : '<p class="muted small">Nenhum fornecedor cadastrado.</p>';
-  },
   paint() {
     const target = document.getElementById('adminUsers');
-    const supplierTarget = document.getElementById('adminSuppliers');
     if (target) target.innerHTML = this.usersHTML();
-    if (supplierTarget) supplierTarget.innerHTML = this.suppliersHTML();
   },
   carregar() {
     this.lerSalvo();
     if (this.carregando) return this.carregando;
     this.carregando = Cloud.request('/api/users')
-      .then(({ users, suppliers }) => {
-        this.data = { users, suppliers }; this.erro = '';
+      .then(({ users }) => {
+        this.data = { users }; this.erro = '';
         try { localStorage.setItem(this.chave(), JSON.stringify(this.data)); } catch (e) { }
       })
       .catch(error => { this.erro = error.message; if (this.data) toast(error.message, 'err'); })
@@ -2345,9 +2389,9 @@ const Auth = {
         <button class="btn primary au-go" type="submit">Entrar</button>
         <p class="au-note">O administrador da agenda cria os acessos da equipe.</p>
       </form>`;
-    else if (mode === 'forn') body = head('Área do fornecedor', 'Digite o seu código de fornecedor (o mesmo do seu cadastro na empresa) para consultar e agendar seus atendimentos.') + `
+    else if (mode === 'forn') body = head('Área do fornecedor', 'Digite o código do laboratório (o mesmo do cadastro na empresa), escolha o comprador e agende seu atendimento.') + `
       <form id="auForm" autocomplete="off">
-        <label class="au-f"><span>Código do fornecedor</span><input name="codigo" placeholder="Ex.: 10234" autocapitalize="characters" required></label>
+        <label class="au-f"><span>Código do laboratório</span><input name="codigo" placeholder="Ex.: 1234" autocapitalize="characters" required></label>
         <div class="au-escolha" id="auEscolha" hidden></div>
         <div class="au-msg" id="auMsg"></div>
         <button class="btn primary au-go" type="submit">Entrar como fornecedor</button>
@@ -2401,11 +2445,11 @@ const Auth = {
             // o mesmo código atende mais de um comprador: escolhe com qual agendar
             const box = ff.querySelector('#auEscolha');
             box.innerHTML = '<span>Com qual comprador você quer agendar?</span>' + user.choose.map(c =>
-              `<button type="button" class="btn" data-uid="${esc(c.userId)}">${icon('fornecedores')} ${esc(c.buyerName)}</button>`).join('');
+              `<button type="button" class="btn" data-uid="${esc(c.buyerId)}">${icon('fornecedores')} ${esc(c.buyerName)}</button>`).join('');
             box.hidden = false; msg('');
             box.querySelectorAll('[data-uid]').forEach(b => b.addEventListener('click', async () => {
               box.querySelectorAll('button').forEach(x => { x.disabled = true; });
-              try { await Cloud.activate(await Cloud.login(Object.assign({}, credentials, { userId: b.dataset.uid }))); }
+              try { await Cloud.activate(await Cloud.login(Object.assign({}, credentials, { buyerId: b.dataset.uid }))); }
               catch (error) { box.querySelectorAll('button').forEach(x => { x.disabled = false; }); msg(error.message || 'Nao foi possivel entrar.'); }
             }));
             return;
@@ -2499,8 +2543,10 @@ const FORN_DIAS_VISIVEIS = 21;
 const Forn = {
   cfg() { const c = DB.cfg('fornCfg', null); return c ? Object.assign({}, FORN_CFG_DEFAULT, c, { dias: Object.assign({}, FORN_CFG_DEFAULT.dias, c.dias || {}) }) : FORN_CFG_DEFAULT; },
   bloqs() { return sortBy(DB.cfg('fornBloq', []), b => b.de, b => b.ini || ''); },
-  lista() { return sortBy(DB.cfg('fornecedores', []), f => norm(f.nome)); },
-  get(id) { return DB.cfg('fornecedores', []).find(f => f.id === id) || null; },
+  // comprador: os fornecedores são os laboratórios (lista única); laboratório logado: o próprio cadastro
+  deLab(l) { return l ? { id: l.id, nome: l.nome, codigo: l.codigo || '', industrias: [], lab: true } : null; },
+  lista() { return Cloud.user?.role === 'supplier' ? sortBy(DB.cfg('fornecedores', []), f => norm(f.nome)) : Engine.labsAtivos().map(l => this.deLab(l)); },
+  get(id) { return Cloud.user?.role === 'supplier' ? DB.cfg('fornecedores', []).find(f => f.id === id) || null : this.deLab(DB.get('laboratorios', id)); },
   // indústrias que o fornecedor representa: [{ labId, nome }] (labId vazio = indústria fora de "Meus laboratórios")
   inds(f) {
     if (!f) return [];
@@ -2552,7 +2598,7 @@ const Forn = {
     const s = Array.from(a, n => abc[n % abc.length]).join('');
     return s.slice(0, 4) + '-' + s.slice(4);
   },
-  porCodigo(c) { const n = Auth.normCode(c); return n ? DB.cfg('fornecedores', []).find(f => Auth.normCode(f.codigo) === n) || null : null; },
+  porCodigo(c) { const n = Auth.normCode(c); return n ? this.lista().find(f => Auth.normCode(f.codigo) === n) || null : null; },
 
   atendimentos() { return sortBy(Engine.demandasAbertas().filter(d => d.atend), d => d.data, d => d.hora); },
   doFornecedor(fornId) { return this.atendimentos().filter(d => d.fornId === fornId && d.data >= today()); },
@@ -2606,7 +2652,7 @@ const Forn = {
     const inds = f ? this.inds(f).filter(i => !industrias || industrias.includes(i.nome)) : [];
     const d = {
       id: uid(), titulo: 'Atendimento fornecedor: ' + quem + ' (' + ini + '–' + fim + ')', data, hora: ini, horaFim: fim,
-      labId: (inds.find(i => i.labId) || {}).labId || '', tipo: 'Compromisso', status: 'A fazer', prioridade: 'MEDIA', recorrencia: { tipo: 'nenhuma' },
+      labId: (inds.find(i => i.labId) || {}).labId || (f && f.lab ? f.id : ''), tipo: 'Compromisso', status: 'A fazer', prioridade: 'MEDIA', recorrencia: { tipo: 'nenhuma' },
       descricao: (inds.length ? 'Indústrias: ' + inds.map(i => i.nome).join(', ') + '\n' : '') + (assunto ? 'Assunto: ' + assunto + '\n' : '') + (por === 'fornecedor' ? 'Agendado pelo fornecedor na área do fornecedor.' : 'Agendado pelo comprador.'),
       atend: true, fornId: fornId || '', fornNome: quem, compradorNome: ((Auth.cfg() || {}).nome) || '', assunto: assunto || '', agendadoPor: por, origem: por === 'fornecedor' ? 'área do fornecedor' : 'manual',
       industrias: inds.map(i => i.nome)
@@ -2641,7 +2687,7 @@ const Forn = {
     if (!el) {
       el = document.createElement('div'); el.id = 'fornPortal'; document.body.appendChild(el); el.addEventListener('click', e => this.onClick(e));
       el.addEventListener('change', async e => {
-        if (e.target.id !== 'fpTroca' || e.target.value === Cloud.user?.id) return;
+        if (e.target.id !== 'fpTroca' || e.target.value === (Cloud.supplierSnapshot || {}).buyerId) return;
         e.target.disabled = true;
         try { await Cloud.switchBuyer(e.target.value); toast('Agenda de ' + (Cloud.supplierSnapshot?.buyerName || 'outro comprador') + '.', 'ok'); }
         catch (error) { toast(error.message || 'Não foi possível trocar de comprador.', 'err'); this.render(); }
@@ -2671,7 +2717,7 @@ const Forn = {
     // comprador desta sessão; com o mesmo código o fornecedor pode atender outros compradores e trocar aqui
     const snap = Cloud.supplierSnapshot || {}, compradores = snap.buyers || [];
     const nomeComprador = snap.buyerName || (Cloud.user ? '' : (a && a.nome)) || 'Comprador';
-    const troca = compradores.length > 1 ? `<label class="fp-troca">Comprador <select id="fpTroca">${compradores.map(c => `<option value="${esc(c.userId)}" ${c.userId === Cloud.user?.id ? 'selected' : ''}>${esc(c.buyerName)}</option>`).join('')}</select></label>` : '';
+    const troca = compradores.length > 1 ? `<label class="fp-troca">Comprador <select id="fpTroca">${compradores.map(c => `<option value="${esc(c.buyerId)}" ${c.buyerId === snap.buyerId ? 'selected' : ''}>${esc(c.buyerName)}</option>`).join('')}</select></label>` : '';
     el.innerHTML = `<header class="fp-top"><img src="${document.getElementById('brandLogo').src}" alt="Grupo Toureiro"><div class="fp-tt"><b>Área do fornecedor</b><span>Agenda de atendimento de <b>${esc(nomeComprador)}</b></span></div>
         ${troca}<div class="fp-user"><span class="u-av">${esc(f.nome.charAt(0).toUpperCase())}</span><span>${esc(this.label(f))}</span><button class="btn sm" data-fp="sair">${icon('lock')} Sair</button></div></header>
       <div class="fp-body">
@@ -2691,8 +2737,8 @@ const Forn = {
           </div>
         </section>
         <aside class="fp-side">
-        <div class="card fp-inds"><div class="card-h"><h3>Minhas indústrias</h3><span class="pill">${this.inds(f).length}</span></div>
-          ${this.inds(f).length ? `<div class="ind-list">${this.inds(f).map(i => `<span class="ind-chip">${esc(i.nome)}</span>`).join('')}</div>` : '<p class="muted small">Nenhuma indústria vinculada. Peça ao comprador para incluir.</p>'}</div>
+        ${this.inds(f).length ? `<div class="card fp-inds"><div class="card-h"><h3>Minhas indústrias</h3><span class="pill">${this.inds(f).length}</span></div>
+          ${`<div class="ind-list">${this.inds(f).map(i => `<span class="ind-chip">${esc(i.nome)}</span>`).join('')}</div>`}</div>` : ''}
         <div class="card fp-meus"><div class="card-h"><h3>Meus agendamentos</h3><span class="pill">${meus.length}</span></div>
           ${meus.length ? meus.map(d => `<div class="fp-mi"><div><b>${fmtDateShort(d.data)} · ${DIAS_CURTO[weekday(d.data)]}</b><span>${esc(d.hora)}–${esc(d.horaFim || '')}</span>${this.indsAtend(d).length ? `<small>${esc(this.indsAtend(d).join(' · '))}</small>` : ''}${d.assunto ? `<small>${esc(d.assunto)}</small>` : ''}</div><button class="btn xs" data-fp="cancel" data-id="${d.id}">Cancelar</button></div>`).join('') : '<p class="muted small">Você ainda não tem atendimentos agendados.</p>'}
         </div></aside>
@@ -3262,15 +3308,17 @@ const Aviso = {
 
 /* ---------- tela do comprador: Área do fornecedor ---------- */
 VIEWS.fornecedores = {
-  title: 'Área do fornecedor',
+  title: 'Atendimentos',
   render(s) {
-    const tab = s.tab || 'agenda';
-    const tabs = `<div class="tabs">${[['agenda', 'Atendimentos'], ['horarios', 'Horários de atendimento'], ['bloqueios', 'Dias bloqueados'], ['cadastro', 'Fornecedores e códigos']].map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-act="fo-tab" data-t="${k}">${l}</button>`).join('')}</div>`;
+    const tab = s.tab === 'horarios' ? 'horarios' : 'agenda';
+    const tabs = `<div class="tabs">${[['agenda', 'Atendimentos e bloqueios'], ['horarios', 'Horários de atendimento']].map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-act="fo-tab" data-t="${k}">${l}</button>`).join('')}</div>`;
     const legacyShare = Cloud.isBuyer() ? '' : (Share.ok() ? btn(icon('folder') + ' Recepção conectada', 'go', 'data-view="dados"', 'sm') : btn(icon('folder') + (Share.dir ? ' Reconectar recepção' : ' Conectar com a recepção'), Share.dir ? 'share-conectar' : 'share-escolher', '', 'sm warn'));
-    const head = pageHead('Área do fornecedor', 'Os fornecedores entram com o código individual emitido pelo comprador; os atendimentos são compartilhados com a recepção.', legacyShare + ' ' + btn(icon('plus') + ' Novo atendimento', 'fo-novo', `data-data="${s.dia || ''}"`, 'primary'));
+    const head = pageHead('Atendimentos', 'Atendimentos dos laboratórios e horários bloqueados. O laboratório entra na área do fornecedor com o código do cadastro de Laboratórios e escolhe o comprador.', legacyShare + ' ' + btn(icon('plus') + ' Novo atendimento', 'fo-novo', `data-data="${s.dia || ''}"`, 'primary'));
     return head + tabs + this[tab](s);
   },
-  agenda(s) {
+  // atendimentos do dia e bloqueios na mesma tela
+  agenda(s) { return this.dia(s) + this.bloqueios(); },
+  dia(s) {
     const t = today(), dia = s.dia || t, F = Forn;
     const di = F.diaInfo(dia), bloqDia = F.diaBloqueado(dia);
     const slots = di ? F.slots(dia, di.passo) : [];
@@ -3312,55 +3360,11 @@ VIEWS.fornecedores = {
         ${bl.length ? `<div class="fo-list">${bl.map(b => `<div class="fo-li"><div><b>${fmtDate(b.de)}${b.ate && b.ate !== b.de ? ' a ' + fmtDate(b.ate) : ''}</b><span>${b.ini ? esc(b.ini) + '–' + esc(b.fim) : 'Dia inteiro'}${b.motivo ? ' · ' + esc(b.motivo) : ''}</span></div><button class="icon-btn" data-act="fo-bq-del" data-id="${b.id}" title="Remover">${icon('trash')}</button></div>`).join('')}</div>` : '<p class="muted small pad">Nenhum dia bloqueado.</p>'}
       </div></aside></div>`;
   },
-  cadastro() {
-    const L = Forn.lista();
-    return `<div class="card"><div class="card-h"><h3>Cadastrar fornecedor</h3></div>
-      <div id="foCad"><div class="fo-form"><label>Código do fornecedor<input name="codigo" placeholder="Ex.: 10234" autocomplete="off" maxlength="40"></label><label class="grow">Nome do fornecedor / representante<input name="nome" placeholder="Ex.: João — Distribuidora Beta"></label></div>
-        <div class="fo-form col"><label>Indústrias que ele representa (pode adicionar várias)</label>${Forn.pickerHTML([])}</div></div>
-      <button class="btn primary" data-act="fo-cad-add">${icon('plus')} Cadastrar fornecedor</button>
-      <p class="muted small">Use o <b>código interno do fornecedor</b>. Na tela de login ele escolhe <b>FORNECEDOR</b> e digita esse código: verá apenas a sua agenda de atendimento. Se ele atender outros compradores com o mesmo código, escolhe com quem agendar.</p></div>
-      <div class="card"><h3>Acesso da recepção</h3><p class="muted small">O administrador cria o acesso individual da recepção. O painel mostra os atendimentos compartilhados e permite registrar chegada, início e finalização.</p></div>
-      <div class="card flush"><div class="card-h pad"><h3>Fornecedores cadastrados</h3><span class="pill">${L.length}</span></div>
-      ${L.length ? `<div class="fo-list">${L.map(f => {
-        const code = f.codigo || '';
-        return `<div class="fo-li"><div><b>${esc(f.nome)}</b>${Forn.inds(f).length ? `<div class="ind-list sm">${Forn.inds(f).map(i => `<span class="ind-chip">${esc(i.nome)}</span>`).join('')}</div>` : '<span>sem indústria</span>'}<small>${Forn.doFornecedor(f.id).length} atendimento(s) futuros</small></div>
-          <span class="fo-cod mono" title="Código do fornecedor (usado para entrar na Área do fornecedor)">${code ? esc(code) : '<span class="c-bad">Sem código</span>'}</span><button class="btn xs" data-act="fo-cad-edit" data-id="${f.id}">${icon('edit')} ${code ? 'Editar' : 'Informar código'}</button>${code ? `<button class="btn xs" data-act="fo-cad-copy" data-id="${f.id}" data-c="${esc(code)}">Copiar</button>` : ''}<button class="icon-btn" data-act="fo-cad-del" data-id="${f.id}" title="Remover">${icon('trash')}</button></div>`;
-      }).join('')}</div>` : '<p class="muted small pad">Nenhum fornecedor cadastrado ainda.</p>'}</div>`;
-  },
   mount(s, main) {
     const di = main.querySelector('#foDia'); if (di) di.addEventListener('change', () => { if (di.value) { s.dia = di.value; App.render(); } });
     const bq = main.querySelector('#foBq');
     if (bq) { const todo = bq.querySelector('[name=todo]'), upd = () => bq.querySelectorAll('.fo-h').forEach(x => x.style.display = todo.checked ? 'none' : ''); todo.addEventListener('change', upd); upd(); }
-    const cad = main.querySelector('#foCad'); if (cad) Forn.pickerMount(cad);
   }
-};
-ACTIONS['fo-cad-edit'] = d => {
-  const f = Forn.get(d.id); if (!f) return;
-  openModal({
-    title: 'Fornecedor e indústrias',
-    body: `<div class="fo-form col"><label>Código do fornecedor (usado para entrar na Área do fornecedor)<input name="codigo" value="${esc(f.codigo || '')}" placeholder="Ex.: 10234" autocomplete="off" maxlength="40"></label>
-      <label>Nome do fornecedor / representante<input name="nome" value="${esc(f.nome)}"></label><label>Indústrias que ele representa</label>${Forn.pickerHTML(Forn.inds(f))}</div>
-      <p class="muted small">O fornecedor vê todas estas indústrias na área dele e escolhe quais serão tratadas em cada atendimento.</p>`,
-    footer: `<button class="btn" data-close>Fechar</button><button class="btn primary" data-ok>${icon('check')} Salvar</button>`,
-    onMount(el, close) {
-      Forn.pickerMount(el);
-      el.querySelector('[data-ok]').addEventListener('click', async () => {
-        const nome = el.querySelector('[name=nome]').value.trim();
-        const codigo = codigoFornecedorValido(el.querySelector('[name=codigo]').value, f.id);
-        if (!codigo) return el.querySelector('[name=codigo]').focus();
-        if (!nome) return toast('Informe o nome do fornecedor.', 'warn');
-        const industrias = Forn.pickerValue(el);
-        const mudouCodigo = codigo !== Auth.normCode(f.codigo);
-        let salvo = null;
-        await DB.setCfg('fornecedores', DB.cfg('fornecedores', []).map(x => { if (x.id !== f.id) return x; const n = Object.assign({}, x, { nome, industrias, codigo }); delete n.labId; salvo = n; return n; }));
-        if (mudouCodigo && Cloud.isBuyer()) {
-          try { await liberarAcessoFornecedor(salvo); toast('Fornecedor atualizado. Agora ele entra com o código ' + codigo + '.', 'ok', 7000); }
-          catch (error) { return toast('Dados salvos, mas o acesso não foi atualizado: ' + error.message, 'warn', 9000); }
-        } else toast('Fornecedor atualizado.', 'ok');
-        close();
-      });
-    }
-  });
 };
 ACTIONS['fo-tab'] = d => { App.s('fornecedores').tab = d.t; App.render(); };
 ACTIONS['fo-dia'] = d => { const s = App.s('fornecedores'), n = +d.n; s.dia = n === 0 ? today() : addDays(s.dia || today(), n); App.render(); };
@@ -3387,39 +3391,6 @@ ACTIONS['fo-hr-save'] = async () => {
   await DB.setCfg('fornCfg', { passo: +q('passo').value || 30, dias });
   toast('Horários de atendimento salvos.', 'ok');
 };
-// código interno do fornecedor: letras e números, até 32; não pode repetir entre os fornecedores do mesmo comprador
-function codigoFornecedorValido(valor, ignorarId) {
-  const codigo = Auth.normCode(valor);
-  if (!codigo) { toast('Informe o código do fornecedor.', 'warn'); return null; }
-  if (codigo.length > 32) { toast('O código do fornecedor pode ter no máximo 32 letras ou números.', 'warn'); return null; }
-  const outro = Forn.porCodigo(codigo);
-  if (outro && outro.id !== ignorarId) { toast('O código ' + codigo + ' já está no cadastro de ' + outro.nome + '.', 'warn'); return null; }
-  return codigo;
-}
-// libera (ou atualiza) no servidor o acesso do fornecedor com o código do cadastro
-async function liberarAcessoFornecedor(f) {
-  await Cloud.sync(); // o cadastro precisa estar no servidor antes
-  return Cloud.request('/api/users', { method: 'POST', body: { action: 'supplier', supplierId: f.id, name: f.nome, code: f.codigo } });
-}
-ACTIONS['fo-cad-add'] = async () => {
-  const f = document.getElementById('foCad'), nome = f.querySelector('[name=nome]').value.trim();
-  const codigo = codigoFornecedorValido(f.querySelector('[name=codigo]').value);
-  if (!codigo) return f.querySelector('[name=codigo]').focus();
-  if (!nome) return toast('Informe o nome do fornecedor.', 'warn');
-  const novo = { id: uid(), nome, industrias: Forn.pickerValue(f), codigo, comprador: (Auth.cfg() || {}).usuario || '', criadoEm: new Date().toISOString() };
-  await DB.setCfg('fornecedores', DB.cfg('fornecedores', []).concat([novo]));
-  if (Cloud.isBuyer()) {
-    try {
-      await liberarAcessoFornecedor(novo);
-      toast('Fornecedor cadastrado. Ele entra na Área do fornecedor com o código ' + codigo + '.', 'ok', 8000);
-    } catch (error) { toast('Fornecedor cadastrado, mas o acesso não foi liberado: ' + error.message + ' Abra "Editar" e salve de novo.', 'warn', 10000); }
-  } else toast('Fornecedor cadastrado. Código: ' + codigo, 'ok', 6000);
-};
-ACTIONS['fo-cad-copy'] = async d => {
-  const code = d.c || (Forn.get(d.id) || {}).codigo;
-  if (!code) return toast('Este fornecedor ainda não tem código.', 'warn');
-  try { await navigator.clipboard.writeText(code); toast('Código copiado.', 'ok'); } catch (e) { toast('Código: ' + code, 'warn', 8000); }
-};
 ACTIONS['fo-recep-senha'] = async () => {
   const f = document.getElementById('foRecep'), s1 = f.querySelector('[name=s1]').value, s2 = f.querySelector('[name=s2]').value;
   if (s1.length < 6) return toast('A senha precisa ter pelo menos 6 caracteres.', 'warn');
@@ -3431,15 +3402,6 @@ ACTIONS['fo-recep-padrao'] = async () => {
   if (!await confirmBox('Voltar a senha da recepção para ' + RECEP_SENHA_PADRAO + '?', 'Voltar para a padrão')) return;
   await Recep.salvarSenha(null);
   toast('A recepção voltou a usar a senha padrão.', 'ok');
-};
-ACTIONS['fo-cad-del'] = async d => {
-  const f = Forn.get(d.id); if (!f) return;
-  if (!await confirmBox('Remover ' + f.nome + '? O código dele deixa de funcionar (os atendimentos já agendados continuam na agenda).', 'Remover', true)) return;
-  if (Cloud.isBuyer()) {
-    try { await Cloud.request('/api/users', { method: 'DELETE', body: { supplierId: f.id } }); }
-    catch (error) { return toast('Não foi possível revogar o acesso: ' + error.message, 'err'); }
-  }
-  await DB.setCfg('fornecedores', DB.cfg('fornecedores', []).filter(x => x.id !== d.id));
 };
 ACTIONS['fo-cancel'] = async (d, el, e) => {
   e.stopPropagation();

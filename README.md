@@ -1,12 +1,12 @@
 # Agenda e Planejamento
 
-Aplicacao web para compradores, recepcao e fornecedores, hospedada na Vercel com PostgreSQL gerenciado pelo Supabase. Compradores e recepcao acessam com contas individuais; fornecedores entram por um codigo individual emitido pelo comprador.
+Aplicacao web para compradores, recepcao e fornecedores, hospedada na Vercel com PostgreSQL gerenciado pelo Supabase. Compradores e recepcao acessam com contas individuais; laboratorios (fornecedores) entram na area do fornecedor com o codigo do cadastro de Laboratorios e escolhem o comprador.
 
 ## Arquivos principais
 
 - `AGENDA.html`, `agenda.css` e `agenda.js`: interface e regras de negocio.
 - `cloud.js`: adaptador de autenticacao, cache local e sincronizacao.
-- `api/`: endpoints de autenticacao, dados, contas, recepcao e fornecedores.
+- `api/`: endpoints de autenticacao, dados, contas, recepcao, laboratorios (`labs.js`) e area do fornecedor.
 - `db/schema.sql`: tabelas, indices, restricoes e RLS do PostgreSQL.
 - `scripts/apply-schema.mjs`: aplica o esquema Supabase.
 - `scripts/bootstrap-admin.mjs`: cria uma unica conta administrativa inicial.
@@ -20,7 +20,7 @@ Aplicacao web para compradores, recepcao e fornecedores, hospedada na Vercel com
 5. Configure `SUPABASE_DB_URL`, `SUPABASE_DB_CA` e `APP_TIME_ZONE` (`America/Sao_Paulo` por padrao) como variaveis da Vercel. Nunca coloque a connection string no navegador.
 6. Publique a pasta como projeto Vercel. O arquivo `vercel.json` define a API e os cabecalhos de seguranca.
 7. Defina `APP_ADMIN_USERNAME`, `APP_ADMIN_NAME` e `APP_ADMIN_PASSWORD` em `.env.local`; execute `npm run bootstrap:admin` uma unica vez contra o banco publicado. Remova a senha inicial do ambiente depois.
-8. Entre no endereco HTTPS como administrador, cadastre compradores e recepcao e compartilhe os convites de fornecedor.
+8. Entre no endereco HTTPS como administrador, cadastre compradores e recepcao e cadastre os laboratorios (o codigo de cada laboratorio e o acesso dele a area do fornecedor).
 
 Para desenvolvimento, instale uma Vercel CLI atual fora das dependencias do projeto (`npm install --global vercel`), configure `.env.local` e execute `vercel dev` diretamente. Nao crie um script npm `dev` que invoque `vercel dev`, pois isso causa recursao. Nao envie `.env.local` ao Git nem use dados reais antes de validar contas e backups.
 
@@ -28,10 +28,11 @@ Para desenvolvimento, instale uma Vercel CLI atual fora das dependencias do proj
 
 - Senhas internas sao armazenadas com `scrypt`; sessoes ficam em cookies `HttpOnly`, `SameSite=Lax` e `Secure` em producao. Tentativas falhas sao limitadas no servidor.
 - Cada comprador so le e grava seus proprios registros. A recepcao recebe uma projecao limitada aos campos de atendimento. O fornecedor ve apenas os horarios e atendimentos vinculados ao seu cadastro; reservas e conflitos sao validados no servidor.
+- Laboratorios sao uma lista unica da empresa (tabela `labs`): compradores cadastram; somente o administrador edita ou exclui. O codigo do laboratorio e unico e obrigatorio. Ao entrar com esse codigo, o laboratorio escolhe o comprador e agenda na agenda dele.
 - A interface mantem IndexedDB como cache e pode oferecer a importacao inicial dos dados locais apos o primeiro login do comprador. O PostgreSQL e a fonte compartilhada entre computadores.
 - Retencao automatica (pg_cron, a cada hora, funcao `cleanup_agenda_records`): agendamentos finalizados (concluidos, cancelados ou com atendimento finalizado) sao excluidos 5 dias apos a finalizacao; agendamentos pendentes que nunca foram iniciados sao excluidos 2 dias apos a data agendada. Agendamentos repetitivos nao entram na regra dos pendentes.
 - Backups locais existentes continuam disponiveis; planeje tambem backup e restauracao do banco PostgreSQL. A pasta compartilhada antiga nao e usada no fluxo cloud.
-- HTTPS e obrigatorio para o uso externo. Restrinja as contas administrativas, desative usuarios desligados e nao reutilize codigos de fornecedor.
+- HTTPS e obrigatorio para o uso externo. Restrinja as contas administrativas, desative usuarios desligados e mantenha os codigos de laboratorio unicos.
 
 ## Validacao antes de uso real
 

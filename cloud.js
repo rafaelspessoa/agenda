@@ -88,6 +88,7 @@ const Cloud = {
     if (!response.ok) {
       const error = new Error(result.error || 'Nao foi possivel acessar o servidor.');
       error.status = response.status;
+      error.data = result; // ex.: laboratório que já tem o código (para oferecer "adicionar aos meus")
       throw error;
     }
     return result;
@@ -136,6 +137,7 @@ const Cloud = {
   localRecords() {
     const records = [];
     STORES.forEach(store => DB.all(store).forEach(record => {
+      if (store === 'laboratorios') return; // laboratórios são compartilhados (api/labs)
       if (store === 'config' && this.localOnlyConfig().includes(record.id)) return;
       records.push({ store, id: record.id, record: this.cloudRecord(store, record) });
     }));
@@ -155,8 +157,8 @@ const Cloud = {
   },
 
   // fornecedor que atende mais de um comprador
-  async switchBuyer(userId) {
-    const result = await this.request('/api/auth', { method: 'POST', body: { action: 'switch-buyer', userId } });
+  async switchBuyer(buyerId) {
+    const result = await this.request('/api/auth', { method: 'POST', body: { action: 'switch-buyer', buyerId } });
     this.realtimeCfg = result.realtime || null;
     await this.activate(result.user);
   },
@@ -188,7 +190,7 @@ const Cloud = {
       this.startPolling();
       this.releaseGate(false);
       if (typeof App !== 'undefined' && App.started) { App.buildNav(); Auth.paintUser(); App.render(); }
-      if (cached) this.flush().then(() => this.pullBuyerData());
+      if (cached) { this.flush().then(() => this.pullBuyerData()); this.loadLabs().catch(() => {}); }
       return;
     }
 
@@ -231,12 +233,57 @@ const Cloud = {
       } else if (local.length) throw new Error('A importacao foi cancelada; os dados locais foram mantidos e o login nao foi concluido.');
     }
     await this.replaceLocal(records);
+    await this.loadLabs();
     await DB.setCfg('cloudOwner', this.user.id, true);
+  },
+
+  // lista única de laboratórios (todos os compradores); substitui o cache local quando muda
+  async loadLabs() {
+    const { labs } = await this.request('/api/labs');
+    const atual = JSON.stringify(sortBy(DB.all('laboratorios').map(l => DB._clean(l)), l => l.id));
+    const novo = sortBy(labs, l => l.id);
+    if (JSON.stringify(novo) === atual) return false;
+    await DB.clear('laboratorios', true);
+    await DB.bulkPut('laboratorios', novo, true);
+    DB.changed('@sync');
+    return true;
+  },
+
+  async saveLab(lab, isNew) {
+    const result = await this.request('/api/labs', { method: isNew ? 'POST' : 'PUT', body: { lab: DB._clean(lab) } });
+    await DB.put('laboratorios', result.lab, true);
+    DB.changed('laboratorios');
+    return result.lab;
+  },
+
+  // adicionar / remover dos meus laboratórios (não altera o cadastro)
+  async linkLab(id, ligar) {
+    const result = await this.request('/api/labs', { method: 'POST', body: { action: ligar === false ? 'unlink' : 'link', id } });
+    await DB.put('laboratorios', result.lab, true);
+    DB.changed('laboratorios');
+    return result.lab;
+  },
+
+  async deleteLab(id) {
+    await this.request('/api/labs', { method: 'DELETE', body: { id } });
+    await DB.del('laboratorios', id, true);
+    DB.changed('laboratorios');
+  },
+
+  async importLabs(labs) {
+    let created = 0, updated = 0, linked = 0, skipped = 0;
+    for (let index = 0; index < labs.length; index += 500) {
+      const r = await this.request('/api/labs', { method: 'POST', body: { action: 'bulk', labs: labs.slice(index, index + 500).map(l => DB._clean(l)) } });
+      created += r.created; updated += r.updated; linked += r.linked || 0; skipped += r.skipped;
+    }
+    await this.loadLabs();
+    return { created, updated, linked, skipped };
   },
 
   async replaceLocal(records) {
     const localConfig = DB.all('config').filter(record => this.localOnlyConfig().includes(record.id));
     for (const store of STORES) {
+      if (store === 'laboratorios') continue; // vem de loadLabs
       await DB.clear(store, true);
       const incoming = records.filter(record => record.store === store).map(record => record.payload);
       if (store === 'config') incoming.push(...localConfig);
@@ -257,14 +304,14 @@ const Cloud = {
       const incoming = new Map(records.map(item => [`${item.store}:${item.id}`, item.payload]));
       let changed = false;
       for (const store of STORES) {
-        if (store === 'config') continue;
+        if (store === 'config' || store === 'laboratorios') continue;
         for (const local of DB.all(store)) {
           const key = `${store}:${local.id}`;
           if (!incoming.has(key) && !this.isPending(store, local.id)) { await DB.del(store, local.id, true); changed = true; }
         }
       }
       for (const item of records) {
-        if (this.isPending(item.store, item.id)) continue;
+        if (item.store === 'laboratorios' || this.isPending(item.store, item.id)) continue;
         const local = DB.get(item.store, item.id);
         if (!local || JSON.stringify(DB._clean(local)) !== JSON.stringify(item.payload)) { await DB.put(item.store, item.payload, true); changed = true; }
       }
@@ -410,7 +457,7 @@ const Cloud = {
 
   // busca o estado atual do servidor conforme o perfil
   refreshNow() {
-    if (this.isBuyer()) { this.flush(); this.pullBuyerData(); }
+    if (this.isBuyer()) { this.flush(); this.pullBuyerData(); this.loadLabs().catch(() => {}); }
     else if (this.user?.role === 'reception') Recep.atualizar();
     else if (this.user?.role === 'supplier') this.loadSupplier().then(() => Forn.render()).catch(error => { this.error = error.message; });
   },

@@ -34,9 +34,13 @@ async function supplierData(sql, user) {
     WHERE owner_id = ${user.buyer_id} AND store = 'config'
       AND record_id IN ('fornCfg', 'fornBloq', 'fornecedores')`;
   const config = Object.fromEntries(configRows.map(row => [row.record_id, row.value]));
-  const source = (config.fornecedores || []).find(item => String(item.id) === user.supplier_id);
-  if (!source) return null;
-  const supplier = { id: source.id, nome: source.nome, industrias: source.industrias || source.inds || [] };
+  // o fornecedor é o laboratório da lista compartilhada (sem código = acesso revogado)
+  // e o comprador precisa ter o laboratório em "meus laboratórios"
+  const [lab] = await sql`SELECT l.id, l.payload->>'nome' AS nome FROM labs l
+    JOIN lab_buyers lb ON lb.lab_id = l.id AND lb.buyer_id = ${user.buyer_id}
+    WHERE l.id = ${user.supplier_id} AND l.code_key IS NOT NULL`;
+  if (!lab) return null;
+  const supplier = { id: lab.id, nome: lab.nome, industrias: [] };
   return {
     supplier,
     cfg: { ...DEFAULT_CFG, ...(config.fornCfg || {}), dias: { ...DEFAULT_CFG.dias, ...((config.fornCfg || {}).dias || {}) } },
@@ -58,12 +62,10 @@ export default async function handler(req, res) {
       WHERE owner_id = ${user.buyer_id} AND store = 'demandas'
         AND payload->>'data' >= ${today} AND payload->>'data' <= ${maxDate}`;
     if (req.method === 'GET') {
-      // compradores atendidos com o mesmo código (para escolher/trocar na área do fornecedor)
-      const buyers = await sql`SELECT u.id AS "userId", b.display_name AS "buyerName"
-        FROM app_users me JOIN app_users u ON u.supplier_code_hash = me.supplier_code_hash AND u.role = 'supplier' AND u.active = TRUE
-        JOIN app_users b ON b.id = u.buyer_id AND b.active = TRUE
-        WHERE me.id = ${user.id} AND me.supplier_code_hash IS NOT NULL ORDER BY b.display_name`;
-      const buyerName = (buyers.find(item => item.userId === user.id) || {}).buyerName || '';
+      // compradores vinculados ao laboratório (para trocar dentro da área)
+      const buyers = await sql`SELECT u.id AS "buyerId", u.display_name AS "buyerName" FROM lab_buyers lb JOIN app_users u ON u.id = lb.buyer_id
+        WHERE lb.lab_id = ${user.supplier_id} AND u.role IN ('buyer', 'admin') AND u.active = TRUE ORDER BY u.display_name`;
+      const buyerName = (buyers.find(item => item.buyerId === user.buyer_id) || {}).buyerName || '';
       const busy = [];
       const appointments = [];
       for (const row of records) {
@@ -80,7 +82,7 @@ export default async function handler(req, res) {
           busy.push({ data: item.data, hora: timeText(item.hora), horaFim: timeText(item.horaFim || item.hora) });
         }
       }
-      return respond(res, 200, { supplier: account.supplier, cfg: account.cfg, blocks: account.blocks, busy, appointments, buyerName, buyers });
+      return respond(res, 200, { supplier: account.supplier, cfg: account.cfg, blocks: account.blocks, busy, appointments, buyerName, buyerId: user.buyer_id, buyers });
     }
 
     if (!['POST', 'DELETE'].includes(req.method)) return respond(res, 405, { error: 'Metodo nao permitido.' });
@@ -138,7 +140,7 @@ export default async function handler(req, res) {
       id, titulo: title, data: date, hora: startText, horaFim: endText, tipo: 'Compromisso', status: 'A fazer',
       prioridade: 'MEDIA', recorrencia: { tipo: 'nenhuma' }, descricao: description, atend: true,
       fornId: user.supplier_id, fornNome: account.supplier.nome, compradorNome: '', assunto: String(body.subject || '').slice(0, 160),
-      agendadoPor: 'fornecedor', origem: 'area do fornecedor', industrias: industries.map(item => item.nome || item)
+      agendadoPor: 'fornecedor', origem: 'area do fornecedor', industrias: industries.map(item => item.nome || item), labId: account.supplier.id
     };
     const inserted = await sql`WITH slot_lock AS MATERIALIZED (
         SELECT pg_advisory_xact_lock(hashtext(${user.buyer_id}), hashtext(${date}))

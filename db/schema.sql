@@ -192,6 +192,61 @@ ON CONFLICT (buyer_id, appointment_id) DO UPDATE SET
   payload = EXCLUDED.payload,
   updated_at = NOW();
 
+-- Laboratórios compartilhados por todos os compradores. O código (code_key, normalizado em
+-- maiúsculas sem símbolos) é único e serve de acesso do laboratório à área do fornecedor.
+-- Compradores cadastram; só o administrador edita ou exclui.
+CREATE TABLE IF NOT EXISTS labs (
+  id TEXT PRIMARY KEY,
+  code_key TEXT UNIQUE,
+  payload JSONB NOT NULL,
+  created_by UUID REFERENCES app_users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- migração: laboratórios que eram de cada comprador passam para a lista única (mesmo id, os agendamentos continuam ligados)
+INSERT INTO labs (id, payload, created_by, created_at, updated_at)
+SELECT r.record_id, r.payload, r.owner_id, r.updated_at, r.updated_at
+FROM app_records r
+WHERE r.store = 'laboratorios'
+ON CONFLICT (id) DO NOTHING;
+
+-- código repetido entre compradores: fica com o cadastro de comprador mais antigo; os outros ficam sem código
+WITH cand AS (
+  SELECT l.id, upper(regexp_replace(l.payload->>'codigo', '[^A-Za-z0-9]', '', 'g')) AS k,
+    row_number() OVER (PARTITION BY upper(regexp_replace(l.payload->>'codigo', '[^A-Za-z0-9]', '', 'g'))
+      ORDER BY (u.role = 'buyer') DESC NULLS LAST, l.created_at) AS rn
+  FROM labs l LEFT JOIN app_users u ON u.id = l.created_by
+  WHERE l.code_key IS NULL AND COALESCE(l.payload->>'codigo', '') ~ '[A-Za-z0-9]'
+)
+UPDATE labs SET code_key = cand.k
+FROM cand
+WHERE labs.id = cand.id AND cand.rn = 1 AND NOT EXISTS (SELECT 1 FROM labs o WHERE o.code_key = cand.k);
+
+UPDATE labs SET payload = payload || '{"codigo": ""}'::jsonb, updated_at = NOW()
+WHERE code_key IS NULL AND COALESCE(payload->>'codigo', '') ~ '[A-Za-z0-9]';
+
+-- compradores que trabalham com cada laboratório ("meus laboratórios"); o laboratório só agenda com eles
+DO $$
+BEGIN
+  IF to_regclass('public.lab_buyers') IS NULL THEN
+    CREATE TABLE lab_buyers (
+      lab_id TEXT NOT NULL REFERENCES labs(id) ON DELETE CASCADE,
+      buyer_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (lab_id, buyer_id)
+    );
+    -- só na criação: quem já tinha o laboratório continua com ele
+    INSERT INTO lab_buyers (lab_id, buyer_id)
+    SELECT l.id, l.created_by FROM labs l JOIN app_users u ON u.id = l.created_by AND u.role IN ('buyer', 'admin')
+    ON CONFLICT DO NOTHING;
+  END IF;
+END;
+$$;
+CREATE INDEX IF NOT EXISTS lab_buyers_buyer_idx ON lab_buyers(buyer_id);
+
+DELETE FROM app_records WHERE store = 'laboratorios' AND record_id IN (SELECT id FROM labs);
+
 -- Retenção de agendamentos (para o banco não crescer sem limite):
 --   * finalizados (concluídos, cancelados ou com atendimento finalizado): 5 dias após a finalização;
 --   * pendentes que nunca foram iniciados: 2 dias após a data agendada.
@@ -249,3 +304,5 @@ ALTER TABLE app_login_limits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE suppliers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE appointments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE labs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE lab_buyers ENABLE ROW LEVEL SECURITY;

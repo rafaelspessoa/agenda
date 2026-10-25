@@ -16,7 +16,8 @@ export function topic(scope, id = '') {
 export const topics = {
   buyer: buyerId => topic('buyer', buyerId),
   supplier: buyerId => topic('supplier', buyerId),
-  reception: () => topic('reception')
+  reception: () => topic('reception'),
+  labs: () => topic('labs') // lista única de laboratórios: todos os compradores atualizam
 };
 
 // canais que cada perfil escuta
@@ -24,7 +25,7 @@ export function realtimeConfig(user) {
   if (!user || !baseUrl() || !publicKey()) return null;
   const list = user.role === 'reception' ? [topics.reception()]
     : user.role === 'supplier' ? [topics.supplier(user.buyer_id)]
-      : [topics.buyer(user.id)];
+      : [topics.buyer(user.id), topics.labs()];
   return { url: baseUrl(), key: publicKey(), topics: list };
 }
 
