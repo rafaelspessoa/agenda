@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { database } from './_db.js';
-import { hashPassword, hashToken, normalizeUsername, publicUser, requireUser, requestBody, respond, revokeSessions, sameOrigin } from './_security.js';
+import { hashPassword, hashToken, normalizeSupplierCode, normalizeUsername, publicUser, requireUser, requestBody, respond, revokeSessions, sameOrigin } from './_security.js';
 
 function validName(value) {
   const name = String(value || '').trim();
@@ -65,11 +65,16 @@ export default async function handler(req, res) {
       if (!buyer) return;
       const name = validName(body.name);
       const supplierId = String(body.supplierId || '').trim();
+      // o acesso usa o código interno do fornecedor, informado no cadastro
+      const code = normalizeSupplierCode(body.code);
       if (!name || !supplierId || supplierId.length > 120) return respond(res, 400, { error: 'Fornecedor invalido.' });
+      if (!code || code.length > 32) return respond(res, 400, { error: 'Informe o codigo do fornecedor (letras e numeros, ate 32).' });
       const records = await sql`SELECT payload FROM app_records WHERE owner_id = ${buyer.id} AND store = 'config' AND record_id = 'fornecedores' LIMIT 1`;
-      const supplier = (records[0]?.payload?.value || []).find(item => String(item.id) === supplierId && String(item.nome || '').trim() === name);
+      const supplier = (records[0]?.payload?.value || []).find(item => String(item.id) === supplierId);
       if (!supplier) return respond(res, 404, { error: 'Cadastre o fornecedor antes de gerar o acesso.' });
-      const code = randomBytes(8).toString('hex').toUpperCase();
+      const repetido = await sql`SELECT 1 FROM app_users WHERE role = 'supplier' AND active = TRUE AND buyer_id = ${buyer.id}
+        AND supplier_code_hash = ${hashToken(code)} AND supplier_id <> ${supplierId} LIMIT 1`;
+      if (repetido.length) return respond(res, 409, { error: 'Voce ja tem outro fornecedor com esse codigo.' });
       const username = 'forn_' + randomBytes(6).toString('hex');
       const rows = await sql`INSERT INTO app_users (username, username_key, display_name, role, buyer_id, supplier_id, supplier_code_hash)
         VALUES (${username}, ${username}, ${name}, 'supplier', ${buyer.id}, ${supplierId}, ${hashToken(code)})
@@ -78,8 +83,7 @@ export default async function handler(req, res) {
           display_name = EXCLUDED.display_name, supplier_code_hash = EXCLUDED.supplier_code_hash, active = TRUE
         RETURNING id, username, display_name, role, buyer_id, supplier_id`;
       await revokeSessions(rows[0].id);
-      const displayCode = code.match(/.{1,4}/g).join('-');
-      return respond(res, 201, { user: publicUser(rows[0]), code: displayCode });
+      return respond(res, 201, { user: publicUser(rows[0]), code });
     }
 
     const admin = await requireUser(req, res, ['admin']);

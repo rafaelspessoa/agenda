@@ -100,6 +100,8 @@ const Cloud = {
 
   async login(credentials) {
     const result = await this.request('/api/auth', { method: 'POST', body: credentials });
+    // código de fornecedor cadastrado por mais de um comprador: a tela pede para escolher
+    if (result.choose) return { choose: result.choose };
     this.realtimeCfg = result.realtime || null;
     return result.user;
   },
@@ -140,12 +142,23 @@ const Cloud = {
     return records;
   },
 
-  cloudRecord(store, record) {
-    const cleaned = DB._clean(record);
-    if (store === 'config' && cleaned.id === 'fornecedores' && Array.isArray(cleaned.value)) {
-      cleaned.value = cleaned.value.map(({ codigo, ...supplier }) => supplier);
+  // o código do fornecedor agora é o código interno do cadastro (não é mais um segredo gerado), então sincroniza junto
+  cloudRecord(store, record) { return DB._clean(record); },
+
+  // espera a fila de envio esvaziar (ex.: o cadastro do fornecedor precisa estar no servidor antes de liberar o acesso)
+  async sync() {
+    for (let i = 0; i < 100 && (this.flushing || this.pending.size); i++) {
+      if (!this.flushing) await this.flush();
+      if (this.error) throw new Error(this.error);
+      if (this.flushing || this.pending.size) await new Promise(r => setTimeout(r, 50));
     }
-    return cleaned;
+  },
+
+  // fornecedor que atende mais de um comprador
+  async switchBuyer(userId) {
+    const result = await this.request('/api/auth', { method: 'POST', body: { action: 'switch-buyer', userId } });
+    this.realtimeCfg = result.realtime || null;
+    await this.activate(result.user);
   },
 
   async activate(user) {

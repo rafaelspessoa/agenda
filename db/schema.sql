@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS app_sessions (
 
 CREATE INDEX IF NOT EXISTS app_sessions_expiry_idx ON app_sessions(expires_at);
 CREATE UNIQUE INDEX IF NOT EXISTS app_users_supplier_idx ON app_users(buyer_id, supplier_id) WHERE role = 'supplier';
+-- login do fornecedor pelo código interno (o mesmo código pode existir em mais de um comprador)
+CREATE INDEX IF NOT EXISTS app_users_supplier_code_idx ON app_users(supplier_code_hash) WHERE role = 'supplier';
 
 CREATE TABLE IF NOT EXISTS app_login_limits (
   key_hash TEXT PRIMARY KEY,

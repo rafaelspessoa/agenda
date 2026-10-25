@@ -58,6 +58,12 @@ export default async function handler(req, res) {
       WHERE owner_id = ${user.buyer_id} AND store = 'demandas'
         AND payload->>'data' >= ${today} AND payload->>'data' <= ${maxDate}`;
     if (req.method === 'GET') {
+      // compradores atendidos com o mesmo código (para escolher/trocar na área do fornecedor)
+      const buyers = await sql`SELECT u.id AS "userId", b.display_name AS "buyerName"
+        FROM app_users me JOIN app_users u ON u.supplier_code_hash = me.supplier_code_hash AND u.role = 'supplier' AND u.active = TRUE
+        JOIN app_users b ON b.id = u.buyer_id AND b.active = TRUE
+        WHERE me.id = ${user.id} AND me.supplier_code_hash IS NOT NULL ORDER BY b.display_name`;
+      const buyerName = (buyers.find(item => item.userId === user.id) || {}).buyerName || '';
       const busy = [];
       const appointments = [];
       for (const row of records) {
@@ -74,7 +80,7 @@ export default async function handler(req, res) {
           busy.push({ data: item.data, hora: timeText(item.hora), horaFim: timeText(item.horaFim || item.hora) });
         }
       }
-      return respond(res, 200, { supplier: account.supplier, cfg: account.cfg, blocks: account.blocks, busy, appointments });
+      return respond(res, 200, { supplier: account.supplier, cfg: account.cfg, blocks: account.blocks, busy, appointments, buyerName, buyers });
     }
 
     if (!['POST', 'DELETE'].includes(req.method)) return respond(res, 405, { error: 'Metodo nao permitido.' });

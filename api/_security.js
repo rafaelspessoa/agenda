@@ -25,6 +25,15 @@ export function sameOrigin(req) {
   try { return new URL(origin).host === req.headers.host; } catch { return false; }
 }
 
+// código interno do fornecedor: só letras e números, sem diferenciar maiúsculas
+export function normalizeSupplierCode(value) {
+  return String(value || '').normalize('NFKC').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+export function clientIp(req) {
+  return String(req.headers['x-real-ip'] || String(req.headers['x-forwarded-for'] || '').split(',')[0] || req.socket?.remoteAddress || '').trim();
+}
+
 export function normalizeUsername(value) {
   return String(value || '').normalize('NFKC').trim().toLowerCase();
 }
@@ -73,14 +82,14 @@ export async function loginLock(key) {
   return until > Date.now() ? Math.ceil((until - Date.now()) / 1000) : 0;
 }
 
-export async function failedLogin(key) {
+export async function failedLogin(key, limit = 5) {
   await database()`INSERT INTO app_login_limits (key_hash, attempts, locked_until, updated_at)
     VALUES (${hashToken(key)}, 1, NULL, NOW())
     ON CONFLICT (key_hash) DO UPDATE SET
       attempts = CASE WHEN app_login_limits.locked_until IS NOT NULL AND app_login_limits.locked_until <= NOW() THEN 1 ELSE app_login_limits.attempts + 1 END,
       locked_until = CASE
         WHEN app_login_limits.locked_until IS NOT NULL AND app_login_limits.locked_until <= NOW() THEN NULL
-        WHEN app_login_limits.attempts + 1 >= 5 THEN NOW() + INTERVAL '15 minutes'
+        WHEN app_login_limits.attempts + 1 >= ${limit} THEN NOW() + INTERVAL '15 minutes'
         ELSE app_login_limits.locked_until
       END,
       updated_at = NOW()`;

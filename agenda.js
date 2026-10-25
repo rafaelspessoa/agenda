@@ -2345,9 +2345,10 @@ const Auth = {
         <button class="btn primary au-go" type="submit">Entrar</button>
         <p class="au-note">O administrador da agenda cria os acessos da equipe.</p>
       </form>`;
-    else if (mode === 'forn') body = head('Área do fornecedor', 'Digite o código de acesso recebido do comprador para consultar e agendar seus atendimentos.') + `
+    else if (mode === 'forn') body = head('Área do fornecedor', 'Digite o seu código de fornecedor (o mesmo do seu cadastro na empresa) para consultar e agendar seus atendimentos.') + `
       <form id="auForm" autocomplete="off">
-        <label class="au-f"><span>Código de acesso</span><input name="codigo" placeholder="XXXX-XXXX-XXXX-XXXX" autocapitalize="characters" required></label>
+        <label class="au-f"><span>Código do fornecedor</span><input name="codigo" placeholder="Ex.: 10234" autocapitalize="characters" required></label>
+        <div class="au-escolha" id="auEscolha" hidden></div>
         <div class="au-msg" id="auMsg"></div>
         <button class="btn primary au-go" type="submit">Entrar como fornecedor</button>
         <p class="au-note">${icon('shield', 'xs')} O código dá acesso somente aos horários e atendimentos vinculados a você.</p>
@@ -2395,7 +2396,21 @@ const Auth = {
           const credentials = mode === 'recep'
             ? { role: 'reception', username: ff.querySelector('[name=usuario]').value, password: ff.querySelector('[name=senha]').value }
             : { role: 'supplier', code: ff.querySelector('[name=codigo]').value };
-          await Cloud.activate(await Cloud.login(credentials));
+          const user = await Cloud.login(credentials);
+          if (user && user.choose) {
+            // o mesmo código atende mais de um comprador: escolhe com qual agendar
+            const box = ff.querySelector('#auEscolha');
+            box.innerHTML = '<span>Com qual comprador você quer agendar?</span>' + user.choose.map(c =>
+              `<button type="button" class="btn" data-uid="${esc(c.userId)}">${icon('fornecedores')} ${esc(c.buyerName)}</button>`).join('');
+            box.hidden = false; msg('');
+            box.querySelectorAll('[data-uid]').forEach(b => b.addEventListener('click', async () => {
+              box.querySelectorAll('button').forEach(x => { x.disabled = true; });
+              try { await Cloud.activate(await Cloud.login(Object.assign({}, credentials, { userId: b.dataset.uid }))); }
+              catch (error) { box.querySelectorAll('button').forEach(x => { x.disabled = false; }); msg(error.message || 'Nao foi possivel entrar.'); }
+            }));
+            return;
+          }
+          await Cloud.activate(user);
         } catch (error) {
           this.falhou();
           msg(error.message || 'Nao foi possivel entrar.');
@@ -2623,7 +2638,15 @@ const Forn = {
     const f = this.get(this.sess);
     if (!f) return this.sair();
     let el = document.getElementById('fornPortal');
-    if (!el) { el = document.createElement('div'); el.id = 'fornPortal'; document.body.appendChild(el); el.addEventListener('click', e => this.onClick(e)); }
+    if (!el) {
+      el = document.createElement('div'); el.id = 'fornPortal'; document.body.appendChild(el); el.addEventListener('click', e => this.onClick(e));
+      el.addEventListener('change', async e => {
+        if (e.target.id !== 'fpTroca' || e.target.value === Cloud.user?.id) return;
+        e.target.disabled = true;
+        try { await Cloud.switchBuyer(e.target.value); toast('Agenda de ' + (Cloud.supplierSnapshot?.buyerName || 'outro comprador') + '.', 'ok'); }
+        catch (error) { toast(error.message || 'Não foi possível trocar de comprador.', 'err'); this.render(); }
+      });
+    }
     const c = this.cfg(), st = this.st, t = today(), a = Auth.cfg();
     const passo = c.passo || 30;
     const durs = []; for (let m = passo; m <= FORN_MAX_MIN; m += passo) durs.push(m);
@@ -2645,8 +2668,12 @@ const Forn = {
     if (!this.diaInfo(st.dia) || this.diaBloqueado(st.dia)) painel = `<div class="fp-vazio">${icon('lock')}<b>Indisponível</b><span>O comprador não atende neste dia.</span></div>`;
     else painel = `<div class="fp-slots">${slotHtml}</div>`;
     const selTxt = st.sel != null ? `${fmtDateLong(st.dia)}, das <b>${this.hm(st.sel)}</b> às <b>${this.hm(st.sel + st.dur)}</b>` : '';
-    el.innerHTML = `<header class="fp-top"><img src="${document.getElementById('brandLogo').src}" alt="Grupo Toureiro"><div class="fp-tt"><b>Área do fornecedor</b><span>Agenda de atendimento de <b>${esc((a && a.nome) || 'Comprador')}</b></span></div>
-        <div class="fp-user"><span class="u-av">${esc(f.nome.charAt(0).toUpperCase())}</span><span>${esc(this.label(f))}</span><button class="btn sm" data-fp="sair">${icon('lock')} Sair</button></div></header>
+    // comprador desta sessão; com o mesmo código o fornecedor pode atender outros compradores e trocar aqui
+    const snap = Cloud.supplierSnapshot || {}, compradores = snap.buyers || [];
+    const nomeComprador = snap.buyerName || (Cloud.user ? '' : (a && a.nome)) || 'Comprador';
+    const troca = compradores.length > 1 ? `<label class="fp-troca">Comprador <select id="fpTroca">${compradores.map(c => `<option value="${esc(c.userId)}" ${c.userId === Cloud.user?.id ? 'selected' : ''}>${esc(c.buyerName)}</option>`).join('')}</select></label>` : '';
+    el.innerHTML = `<header class="fp-top"><img src="${document.getElementById('brandLogo').src}" alt="Grupo Toureiro"><div class="fp-tt"><b>Área do fornecedor</b><span>Agenda de atendimento de <b>${esc(nomeComprador)}</b></span></div>
+        ${troca}<div class="fp-user"><span class="u-av">${esc(f.nome.charAt(0).toUpperCase())}</span><span>${esc(this.label(f))}</span><button class="btn sm" data-fp="sair">${icon('lock')} Sair</button></div></header>
       <div class="fp-body">
         <section class="card fp-main">
           <div class="card-h"><h3>1. Escolha o dia</h3><span class="muted small">próximos ${FORN_DIAS_VISIVEIS} dias</span></div>
@@ -3288,16 +3315,16 @@ VIEWS.fornecedores = {
   cadastro() {
     const L = Forn.lista();
     return `<div class="card"><div class="card-h"><h3>Cadastrar fornecedor</h3></div>
-      <div id="foCad"><div class="fo-form"><label class="grow">Nome do fornecedor / representante<input name="nome" placeholder="Ex.: João — Distribuidora Beta"></label></div>
+      <div id="foCad"><div class="fo-form"><label>Código do fornecedor<input name="codigo" placeholder="Ex.: 10234" autocomplete="off" maxlength="40"></label><label class="grow">Nome do fornecedor / representante<input name="nome" placeholder="Ex.: João — Distribuidora Beta"></label></div>
         <div class="fo-form col"><label>Indústrias que ele representa (pode adicionar várias)</label>${Forn.pickerHTML([])}</div></div>
-      <button class="btn primary" data-act="fo-cad-add">${icon('plus')} Cadastrar e gerar código</button>
-      <p class="muted small">Passe o código para o fornecedor. Na tela de login ele escolhe <b>FORNECEDOR</b> e digita o código: verá apenas a sua agenda de atendimento.</p></div>
+      <button class="btn primary" data-act="fo-cad-add">${icon('plus')} Cadastrar fornecedor</button>
+      <p class="muted small">Use o <b>código interno do fornecedor</b>. Na tela de login ele escolhe <b>FORNECEDOR</b> e digita esse código: verá apenas a sua agenda de atendimento. Se ele atender outros compradores com o mesmo código, escolhe com quem agendar.</p></div>
       <div class="card"><h3>Acesso da recepção</h3><p class="muted small">O administrador cria o acesso individual da recepção. O painel mostra os atendimentos compartilhados e permite registrar chegada, início e finalização.</p></div>
       <div class="card flush"><div class="card-h pad"><h3>Fornecedores cadastrados</h3><span class="pill">${L.length}</span></div>
       ${L.length ? `<div class="fo-list">${L.map(f => {
-        const code = Cloud.isBuyer() ? Cloud.supplierCodes.get(f.id) : f.codigo;
+        const code = f.codigo || '';
         return `<div class="fo-li"><div><b>${esc(f.nome)}</b>${Forn.inds(f).length ? `<div class="ind-list sm">${Forn.inds(f).map(i => `<span class="ind-chip">${esc(i.nome)}</span>`).join('')}</div>` : '<span>sem indústria</span>'}<small>${Forn.doFornecedor(f.id).length} atendimento(s) futuros</small></div>
-          <span class="fo-cod mono">${code ? esc(code) : 'Convite nao gerado'}</span><button class="btn xs" data-act="fo-cad-edit" data-id="${f.id}">${icon('edit')} Indústrias</button>${code ? `<button class="btn xs" data-act="fo-cad-copy" data-id="${f.id}" data-c="${esc(code)}">Copiar</button>` : ''}<button class="btn xs" data-act="fo-cad-new" data-id="${f.id}">${code ? 'Novo código' : 'Gerar convite'}</button><button class="icon-btn" data-act="fo-cad-del" data-id="${f.id}" title="Remover">${icon('trash')}</button></div>`;
+          <span class="fo-cod mono" title="Código do fornecedor (usado para entrar na Área do fornecedor)">${code ? esc(code) : '<span class="c-bad">Sem código</span>'}</span><button class="btn xs" data-act="fo-cad-edit" data-id="${f.id}">${icon('edit')} ${code ? 'Editar' : 'Informar código'}</button>${code ? `<button class="btn xs" data-act="fo-cad-copy" data-id="${f.id}" data-c="${esc(code)}">Copiar</button>` : ''}<button class="icon-btn" data-act="fo-cad-del" data-id="${f.id}" title="Remover">${icon('trash')}</button></div>`;
       }).join('')}</div>` : '<p class="muted small pad">Nenhum fornecedor cadastrado ainda.</p>'}</div>`;
   },
   mount(s, main) {
@@ -3311,17 +3338,26 @@ ACTIONS['fo-cad-edit'] = d => {
   const f = Forn.get(d.id); if (!f) return;
   openModal({
     title: 'Fornecedor e indústrias',
-    body: `<div class="fo-form col"><label>Nome do fornecedor / representante<input name="nome" value="${esc(f.nome)}"></label><label>Indústrias que ele representa</label>${Forn.pickerHTML(Forn.inds(f))}</div>
+    body: `<div class="fo-form col"><label>Código do fornecedor (usado para entrar na Área do fornecedor)<input name="codigo" value="${esc(f.codigo || '')}" placeholder="Ex.: 10234" autocomplete="off" maxlength="40"></label>
+      <label>Nome do fornecedor / representante<input name="nome" value="${esc(f.nome)}"></label><label>Indústrias que ele representa</label>${Forn.pickerHTML(Forn.inds(f))}</div>
       <p class="muted small">O fornecedor vê todas estas indústrias na área dele e escolhe quais serão tratadas em cada atendimento.</p>`,
     footer: `<button class="btn" data-close>Fechar</button><button class="btn primary" data-ok>${icon('check')} Salvar</button>`,
     onMount(el, close) {
       Forn.pickerMount(el);
       el.querySelector('[data-ok]').addEventListener('click', async () => {
         const nome = el.querySelector('[name=nome]').value.trim();
+        const codigo = codigoFornecedorValido(el.querySelector('[name=codigo]').value, f.id);
+        if (!codigo) return el.querySelector('[name=codigo]').focus();
         if (!nome) return toast('Informe o nome do fornecedor.', 'warn');
         const industrias = Forn.pickerValue(el);
-        await DB.setCfg('fornecedores', DB.cfg('fornecedores', []).map(x => { if (x.id !== f.id) return x; const n = Object.assign({}, x, { nome, industrias }); delete n.labId; return n; }));
-        toast('Fornecedor atualizado.', 'ok'); close();
+        const mudouCodigo = codigo !== Auth.normCode(f.codigo);
+        let salvo = null;
+        await DB.setCfg('fornecedores', DB.cfg('fornecedores', []).map(x => { if (x.id !== f.id) return x; const n = Object.assign({}, x, { nome, industrias, codigo }); delete n.labId; salvo = n; return n; }));
+        if (mudouCodigo && Cloud.isBuyer()) {
+          try { await liberarAcessoFornecedor(salvo); toast('Fornecedor atualizado. Agora ele entra com o código ' + codigo + '.', 'ok', 7000); }
+          catch (error) { return toast('Dados salvos, mas o acesso não foi atualizado: ' + error.message, 'warn', 9000); }
+        } else toast('Fornecedor atualizado.', 'ok');
+        close();
       });
     }
   });
@@ -3351,42 +3387,38 @@ ACTIONS['fo-hr-save'] = async () => {
   await DB.setCfg('fornCfg', { passo: +q('passo').value || 30, dias });
   toast('Horários de atendimento salvos.', 'ok');
 };
+// código interno do fornecedor: letras e números, até 32; não pode repetir entre os fornecedores do mesmo comprador
+function codigoFornecedorValido(valor, ignorarId) {
+  const codigo = Auth.normCode(valor);
+  if (!codigo) { toast('Informe o código do fornecedor.', 'warn'); return null; }
+  if (codigo.length > 32) { toast('O código do fornecedor pode ter no máximo 32 letras ou números.', 'warn'); return null; }
+  const outro = Forn.porCodigo(codigo);
+  if (outro && outro.id !== ignorarId) { toast('O código ' + codigo + ' já está no cadastro de ' + outro.nome + '.', 'warn'); return null; }
+  return codigo;
+}
+// libera (ou atualiza) no servidor o acesso do fornecedor com o código do cadastro
+async function liberarAcessoFornecedor(f) {
+  await Cloud.sync(); // o cadastro precisa estar no servidor antes
+  return Cloud.request('/api/users', { method: 'POST', body: { action: 'supplier', supplierId: f.id, name: f.nome, code: f.codigo } });
+}
 ACTIONS['fo-cad-add'] = async () => {
   const f = document.getElementById('foCad'), nome = f.querySelector('[name=nome]').value.trim();
+  const codigo = codigoFornecedorValido(f.querySelector('[name=codigo]').value);
+  if (!codigo) return f.querySelector('[name=codigo]').focus();
   if (!nome) return toast('Informe o nome do fornecedor.', 'warn');
-  let codigo = '';
-  if (!Cloud.isBuyer()) { do codigo = Forn.novoCodigo(); while (Forn.porCodigo(codigo)); }
   const novo = { id: uid(), nome, industrias: Forn.pickerValue(f), codigo, comprador: (Auth.cfg() || {}).usuario || '', criadoEm: new Date().toISOString() };
   await DB.setCfg('fornecedores', DB.cfg('fornecedores', []).concat([novo]));
   if (Cloud.isBuyer()) {
     try {
-      const invite = await Cloud.request('/api/users', { method: 'POST', body: { action: 'supplier', supplierId: novo.id, name: novo.nome } });
-      Cloud.supplierCodes.set(novo.id, invite.code);
-      App.render();
-      toast('Fornecedor cadastrado. Código de acesso: ' + invite.code, 'ok', 8000);
-    } catch (error) { toast('Fornecedor cadastrado, mas o convite não foi gerado: ' + error.message, 'warn', 8000); }
+      await liberarAcessoFornecedor(novo);
+      toast('Fornecedor cadastrado. Ele entra na Área do fornecedor com o código ' + codigo + '.', 'ok', 8000);
+    } catch (error) { toast('Fornecedor cadastrado, mas o acesso não foi liberado: ' + error.message + ' Abra "Editar" e salve de novo.', 'warn', 10000); }
   } else toast('Fornecedor cadastrado. Código: ' + codigo, 'ok', 6000);
 };
 ACTIONS['fo-cad-copy'] = async d => {
-  const code = d.c || Cloud.supplierCodes.get(d.id);
-  if (!code) return toast('Gere um novo convite para copiar o código.', 'warn');
+  const code = d.c || (Forn.get(d.id) || {}).codigo;
+  if (!code) return toast('Este fornecedor ainda não tem código.', 'warn');
   try { await navigator.clipboard.writeText(code); toast('Código copiado.', 'ok'); } catch (e) { toast('Código: ' + code, 'warn', 8000); }
-};
-ACTIONS['fo-cad-new'] = async d => {
-  if (!await confirmBox('Gerar um novo código? O código antigo deixa de funcionar.', 'Gerar novo código')) return;
-  let codigo;
-  if (Cloud.isBuyer()) {
-    const supplier = Forn.get(d.id); if (!supplier) return;
-    try {
-      const invite = await Cloud.request('/api/users', { method: 'POST', body: { action: 'supplier', supplierId: supplier.id, name: supplier.nome } });
-      codigo = invite.code;
-    } catch (error) { return toast('Não foi possível renovar o código: ' + error.message, 'err'); }
-  } else { do codigo = Forn.novoCodigo(); while (Forn.porCodigo(codigo)); }
-  if (Cloud.isBuyer()) {
-    Cloud.supplierCodes.set(d.id, codigo);
-    App.render();
-  } else await DB.setCfg('fornecedores', DB.cfg('fornecedores', []).map(f => f.id === d.id ? Object.assign({}, f, { codigo }) : f));
-  toast('Novo código: ' + codigo, 'ok', 6000);
 };
 ACTIONS['fo-recep-senha'] = async () => {
   const f = document.getElementById('foRecep'), s1 = f.querySelector('[name=s1]').value, s2 = f.querySelector('[name=s2]').value;
