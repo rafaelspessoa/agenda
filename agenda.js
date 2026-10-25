@@ -770,7 +770,7 @@ const App = {
       Engine.invalidate();
       if (store !== '@sync') { Backup.schedule(); if (!Cloud.isBuyer()) Share.agendarPublicar(); }
       // Contas de acesso nao depende dos dados sincronizados: redesenhar apagaria o formulario em edicao
-      if (store === '@sync' && this.view === 'usuarios') { this.refreshChrome(); return; }
+      if (store === '@sync' && this.view === 'usuarios') { this.refreshChrome(); Aviso.check(); return; }
       this.renderSoon();
     });
     this.started = true;
@@ -2756,7 +2756,7 @@ const Recep = {
   renderSeguro() {
     const el = document.getElementById('recepPortal'); if (!el) return;
     const ae = document.activeElement;
-    if (ae && el.contains(ae) && (ae.id === 'rpBusca' || ae.id === 'rpDia')) { this.relogio(); return; }
+    if (ae && el.contains(ae) && (ae.id === 'rpBusca' || ae.id === 'rpDia' || (ae._iso && ae._iso.id === 'rpDia'))) { this.relogio(); return; }
     this.render();
   },
   comprador(d) { return d.compradorNome || ((Auth.cfg() || {}).nome) || 'Comprador'; },
@@ -2836,11 +2836,11 @@ const Recep = {
     const bate = (d, c) => !q || norm([d.fornNome, d.titulo, Forn.indsAtend(d).join(' '), c.nome, d.assunto, d.descricao].join(' ')).includes(q);
     const doDia = c => sortBy(c.itens.filter(d => noPeriodo(d) && bate(d, c)), d => d.data, d => d.hora);
     const filtro = st.f || 'abertos';
-    const todos = [];
-    const compradores = fontes.map(c => { const it = doDia(c); todos.push(...it); return { nome: c.nome, atualizadoEm: c.atualizadoEm, local: c.local, itens: it.filter(d => this.passa(d, filtro)) }; })
-      .filter(c => !q || c.itens.length || norm(c.nome).includes(q));
-    const proximos = {};
-    fontes.forEach(c => { proximos[c.nome] = c.itens.filter(d => d.data > dia && !STATUS_FECHADO.includes(d.status)).length; });
+    // uma lista única de agendamentos (sem colunas por comprador); o comprador aparece dentro de cada cartão
+    const todos = sortBy([].concat(...fontes.map(c => doDia(c).map(d => Object.assign({}, d, { compradorNome: d.compradorNome || c.nome })))), d => d.data, d => d.hora || '');
+    const lista = todos.filter(d => this.passa(d, filtro));
+    const proximos = fontes.reduce((n, c) => n + c.itens.filter(d => d.data > dia && !STATUS_FECHADO.includes(d.status)).length, 0);
+    const corDe = nome => { let h = 0; for (const ch of String(nome || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return this.CORES[h % this.CORES.length]; };
     const cont = { recepcao: 0, aguardando: 0, agendado: 0, atendimento: 0, concluido: 0, cancelado: 0 };
     todos.forEach(d => cont[this.status(d)]++);
     const BTN = {
@@ -2859,7 +2859,8 @@ const Recep = {
     const card = d => {
       const s = this.status(d), inds = Forn.indsAtend(d), atr = this.atraso(d);
       const info = s === 'recepcao' ? 'Chegou às ' + this.hora(d.chegouEm) : s === 'atendimento' ? (d.chegouEm ? 'Chegou às ' + this.hora(d.chegouEm) + ' · ' : '') + 'previsto até ' + (d.horaFim || '') : s === 'concluido' && d.finalizouEm ? 'Finalizado às ' + this.hora(d.finalizouEm) : atr ? 'Atrasado ' + atr + ' min' : (d.horaFim ? 'até ' + d.horaFim : '');
-      return `<div class="rp-card ${s}">
+      return `<div class="rp-card ${s}" style="--cc:${corDe(d.compradorNome)}">
+        <div class="rp-buyer"><i></i>${esc(this.comprador(d))}</div>
         <div class="rp-ch"><b class="rp-time">${esc(d.hora || '--:--')}${d.horaFim ? `<small> – ${esc(d.horaFim)}</small>` : ''}</b><span class="rp-pill ${s}">${this.ST_TXT[s]}</span></div>
         <div class="rp-forn">${esc(d.fornNome || d.titulo || 'Agendamento')}</div>
         ${inds.length === 1 ? `<div class="rp-lab">${esc(inds[0])}</div>` : inds.length ? `<div class="rp-inds">${inds.map(n => `<span>${esc(n)}</span>`).join('')}</div>` : ''}
@@ -2868,21 +2869,16 @@ const Recep = {
         ${avisoTxt(d)}
         ${d.data > t && (s === 'agendado' || s === 'aguardando') ? `<div class="rp-btn done">${this.ic('total')} Agendado para ${DIAS_CURTO[weekday(d.data)]} ${fmtDateShort(d.data)}</div>` : BTN[s] ? BTN[s](d) : ''}</div>`;
     };
-    const col = (c, i) => {
-      const cor = this.CORES[i % this.CORES.length], n = c.itens.length, px = proximos[c.nome] || 0;
-      const sync = c.local ? 'neste computador' : c.atualizadoEm ? 'atualizado ' + this.quando(c.atualizadoEm) : '';
-      return `<div class="rp-col" style="--cc:${cor}">
-        <div class="rp-colh"><span class="rp-av">${esc(this.iniciais(c.nome))}</span><div><b>${esc(c.nome)}</b><small>Comprador${sync ? ' · ' + esc(sync) : ''}</small></div><span class="rp-cnt"><b>${n}</b><small>agendamento${n === 1 ? '' : 's'}</small></span></div>
-        <div class="rp-cards">${c.itens.map((d, j) => (multi && (j === 0 || c.itens[j - 1].data !== d.data) ? `<div class="rp-sep">${d.data === t ? 'Hoje' : d.data === addDays(t, 1) ? 'Amanhã' : DIAS_SEMANA[weekday(d.data)]} · ${fmtDateShort(d.data)}</div>` : '') + card(d)).join('')}
-          <div class="rp-fim">${this.ic('total')}<span>${n ? 'Sem mais' : 'Nenhum'} ${this.FILTRO_TXT[filtro]} ${q ? 'para essa busca' : multi ? 'nos próximos dias' : dia === t ? 'hoje' : 'neste dia'}${px && !multi ? ` · <a data-rp="prox" data-c="${esc(c.nome)}">${px} nos próximos dias</a>` : ''}</span></div></div></div>`;
-    };
+    const n = lista.length;
+    const grade = `<div class="rp-cards rp-grade">${lista.map((d, j) => (multi && (j === 0 || lista[j - 1].data !== d.data) ? `<div class="rp-sep">${d.data === t ? 'Hoje' : d.data === addDays(t, 1) ? 'Amanhã' : DIAS_SEMANA[weekday(d.data)]} · ${fmtDateShort(d.data)}</div>` : '') + card(d)).join('')}
+      <div class="rp-fim">${this.ic('total')}<span>${n ? 'Sem mais' : 'Nenhum'} ${this.FILTRO_TXT[filtro]} ${q ? 'para essa busca' : multi ? 'nos próximos dias' : dia === t ? 'hoje' : 'neste dia'}${proximos && !multi ? ` · <a data-rp="prox">${proximos} nos próximos dias</a>` : ''}</span></div></div>`;
     const kpi = (k, cls, label, n, sub, f) => `<button type="button" class="rp-kpi rp-kf ${filtro === f ? 'on' : ''}" data-rp="filtro" data-f="${f}" title="${filtro === f && f !== 'abertos' ? 'Clique para voltar aos que estão a fazer' : 'Mostrar só: ' + this.FILTRO_TXT[f]}"><span class="rp-ki ${cls}">${this.ic(k)}</span><div><small>${label}</small><b class="${cls}">${n}</b>${sub ? `<span>${sub}</span>` : ''}</div></button>`;
     const aFazer = cont.agendado + cont.aguardando + cont.recepcao + cont.atendimento;
     const dn = DIAS_SEMANA[weekday(t)] + (weekday(t) > 0 && weekday(t) < 6 ? '-feira' : '');
     const shBtn = Cloud.user?.role === 'reception' ? '' : !Share.supported ? '' : Share.ok()
       ? `<button class="rp-share on" data-rp="share" title="Pasta compartilhada: ${esc(Share.nomePasta())}${Share.erro ? ' — ' + esc(Share.erro) : ''}">${icon('folder')}<span>${Share.erro ? 'Erro na pasta' : fontes.filter(c => !c.local).length + ' comprador(es) conectado(s)'}</span></button>`
       : `<button class="rp-share off" data-rp="share">${icon('folder')}<span>${Share.dir ? 'Reconectar pasta' : 'Conectar pasta compartilhada'}</span></button>`;
-    const vazio = !fontes.length ? `<div class="fp-vazio rp-vazio">${icon('folder')}<b>Nenhum agendamento encontrado</b><span>${Cloud.user?.role === 'reception' ? 'Os atendimentos dos fornecedores aparecerão aqui quando forem agendados.' : Share.supported ? 'Conecte a pasta compartilhada usada pelos compradores para exibir os agendamentos.' : 'Abra este arquivo no Google Chrome ou Microsoft Edge para ver os agendamentos dos compradores.'}</span></div>` : '';
+    const vazio = !fontes.length ? `<div class="fp-vazio rp-vazio">${icon('folder')}<b>Nenhum agendamento encontrado</b><span>${Cloud.user?.role === 'reception' ? 'Os agendamentos dos compradores aparecerão aqui assim que forem criados.' : Share.supported ? 'Conecte a pasta compartilhada usada pelos compradores para exibir os agendamentos.' : 'Abra este arquivo no Google Chrome ou Microsoft Edge para ver os agendamentos dos compradores.'}</span></div>` : '';
     el.innerHTML = `<header class="rp-top"><img src="${document.getElementById('brandLogo').src}" alt="Grupo Toureiro">
         <div class="rp-title"><b>PAINEL DA RECEPÇÃO</b><span>Agendamentos de todos os compradores</span></div>
         ${shBtn}
@@ -2895,7 +2891,7 @@ const Recep = {
         ${kpi('aguardando', 'k-amber', 'AGUARDANDO', cont.aguardando + cont.agendado, '', 'aguardando')}
         ${kpi('atendimento', 'k-blue', 'EM ATENDIMENTO', cont.atendimento, '', 'atendimento')}
         ${kpi('concluido', 'k-gray', 'CONCLUÍDOS', cont.concluido, '', 'concluido')}
-        <div class="rp-sbox"><label class="rp-search">${icon('search')}<input id="rpBusca" type="search" placeholder="Buscar fornecedor (todos os dias)…" value="${esc(st.q || '')}"></label>
+        <div class="rp-sbox"><label class="rp-search">${icon('search')}<input id="rpBusca" type="search" placeholder="Buscar agendamento ou comprador…" value="${esc(st.q || '')}"></label>
           <button type="button" class="rp-modo ${st.modo === 'prox' ? 'on' : ''}" data-rp="modo">${this.ic('total')} ${st.modo === 'prox' ? 'Ver só o dia' : 'Próximos dias'}</button></div>
       </div>
       ${filtro !== 'abertos' ? `<div class="rp-outro rp-filt">${filtro === 'todos' ? 'Mostrando <b>todos</b> os agendamentos do dia, inclusive os concluídos' : 'Mostrando só: <b>' + this.FILTRO_TXT[filtro] + '</b>'} · <a data-rp="filtro" data-f="abertos">voltar para os que estão a fazer</a></div>` : ''}
@@ -2903,8 +2899,7 @@ const Recep = {
         : st.modo === 'prox' ? `<div class="rp-outro">Mostrando os <b>próximos agendamentos</b> a partir de ${desde === t ? 'hoje' : esc(fmtDateLong(desde))} · <a data-rp="modo">ver só o dia</a></div>`
         : dia !== t ? `<div class="rp-outro">Mostrando <b>${esc(fmtDateLong(dia))}</b> · <a data-rp="dia" data-n="0">voltar para hoje</a> · <a data-rp="modo">ver próximos dias</a></div>` : ''}
       ${Cloud.user?.role !== 'reception' && Share.dir && !Share.ok() ? `<div class="rp-outro rp-warn">${icon('alert')} A pasta compartilhada precisa de permissão de novo. <a data-rp="share">Clique aqui para reconectar</a> e ver os agendamentos dos outros compradores.</div>` : ''}
-      ${!todos.length && fontes.length ? `<div class="rp-outro">Nenhum agendamento ${dia === t ? 'hoje' : 'neste dia'}. Compradores encontrados: ${fontes.map(c => `<b>${esc(c.nome)}</b> (${c.itens.length} agendamento${c.itens.length === 1 ? '' : 's'} no total${c.local ? ', neste computador' : c.atualizadoEm ? ', atualizado ' + esc(this.quando(c.atualizadoEm)) : ''})`).join(' · ')}. Use as setas embaixo para ver outros dias.</div>` : ''}
-      <div class="rp-cols">${vazio || (compradores.length ? compradores.map(col).join('') : `<div class="fp-vazio">${icon('search')}<b>Nada encontrado</b><span>Confira o nome digitado.</span></div>`)}</div>
+      <div class="rp-cols rp-lista">${vazio || (q && !n ? `<div class="fp-vazio">${icon('search')}<b>Nada encontrado</b><span>Confira o nome digitado.</span></div>` : grade)}</div>
       <footer class="rp-foot"><span class="rp-info-i">i</span><span class="rp-help">Registrar chegada avisa o comprador na tela dele (alerta com som e no sino). O comprador inicia e finaliza o atendimento — o status muda aqui sozinho.</span>
         <span class="rp-leg"><i style="background:#f59e0b"></i>Aguardando<i style="background:#2563eb"></i>Na recepção<i style="background:#16a34a"></i>Em atendimento<i style="background:#6b7280"></i>Concluído</span>
         <div class="rp-dia"><button data-rp="dia" data-n="-1" title="Dia anterior">${icon('chevL')}</button><label>${this.ic('total')} Visualização do dia<input type="date" id="rpDia" value="${dia}"></label><button data-rp="dia" data-n="1" title="Próximo dia">${icon('chevR')}</button></div></footer>`;
@@ -2956,6 +2951,9 @@ const Recep = {
           await Engine.salvarDemanda(Object.assign({}, orig, novo, { recepEm: agora }), orig);
         } else {
           await Share.marcar(d._slug, d.id, novo);
+          // já mostra a nova etapa no painel, sem esperar a próxima atualização
+          Object.assign(d, novo);
+          if (Cloud.user?.role === 'reception') this.atualizar();
         }
         toast(msg, k === 'voltar' ? 'info' : 'ok', 4500);
       } catch (err) {
@@ -3179,7 +3177,7 @@ const Aviso = {
     if (!bg) { bg = document.createElement('div'); bg.id = 'avisoBg'; bg.className = 'aviso-bg'; document.body.appendChild(bg); bg.addEventListener('click', e => this.onClick(e)); }
     const t = today();
     bg.innerHTML = `<div class="aviso" role="alertdialog" aria-live="assertive">
-      <div class="aviso-h"><span class="aviso-ic">${icon('bell')}</span><div><b>${l.length === 1 ? 'Fornecedor chegou na recepção' : l.length + ' fornecedores chegaram na recepção'}</b><small>A recepção está avisando você · ${nowHM()}</small></div></div>
+      <div class="aviso-h"><span class="aviso-ic">${icon('bell')}</span><div><b>${l.length === 1 ? 'Chegou na recepção: ' + esc(l[0].fornNome || l[0].titulo || 'visitante') : l.length + ' visitantes chegaram na recepção'}</b><small>A recepção está avisando você · ${nowHM()}</small></div></div>
       <div class="aviso-l">${l.map(d => `<div class="aviso-i"><div><b>${esc(d.fornNome || d.titulo || 'Fornecedor')}</b>
           <span>Agendado ${d.data !== t ? fmtDateShort(d.data) + ' ' : ''}às ${esc(d.hora || '')}${d.horaFim ? '–' + esc(d.horaFim) : ''} · chegou às ${Recep.hora(d.chegouEm || d.avisoEm)}${d.chegouEm && d.avisoEm > d.chegouEm ? ' · <em>avisado de novo às ' + Recep.hora(d.avisoEm) + '</em>' : ''}</span>
           ${Forn.indsAtend(d).length ? `<small>${esc(Forn.indsAtend(d).join(' · '))}</small>` : ''}${d.assunto ? `<small>Assunto: ${esc(d.assunto)}</small>` : ''}</div>
@@ -3216,7 +3214,7 @@ const Aviso = {
     try {
       if (!('Notification' in window) || Notification.permission !== 'granted') return;
       const d = l[0];
-      const n = new Notification(l.length === 1 ? 'Chegou na recepção: ' + (d.fornNome || d.titulo || 'Fornecedor') : l.length + ' fornecedores chegaram na recepção', {
+      const n = new Notification(l.length === 1 ? 'Chegou na recepção: ' + (d.fornNome || d.titulo || 'Fornecedor') : l.length + ' visitantes chegaram na recepção', {
         body: l.map(x => (x.fornNome || x.titulo || 'Fornecedor') + ' · agendado às ' + (x.hora || '')).join('\n') + '\nA recepção está avisando você.', tag: 'agenda-recepcao', requireInteraction: true
       });
       n.onclick = () => { try { window.focus(); } catch (e) { } n.close(); };
@@ -3226,7 +3224,7 @@ const Aviso = {
   piscar(n) {
     if (n && !this.flash) {
       let on = false;
-      this.flash = setInterval(() => { on = !on; document.title = on ? '🔔 Fornecedor na recepção!' : (this.tituloBase || 'Agenda e Planejamento'); }, 1000);
+      this.flash = setInterval(() => { on = !on; document.title = on ? '🔔 Chegou na recepção!' : (this.tituloBase || 'Agenda e Planejamento'); }, 1000);
     } else if (!n && this.flash) { clearInterval(this.flash); this.flash = null; if (this.tituloBase) document.title = this.tituloBase; }
   }
 };
