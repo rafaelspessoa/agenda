@@ -51,6 +51,8 @@ const Cloud = {
   async logout() {
     try { await this.request('/api/auth', { method: 'POST', body: { action: 'logout' } }); }
     finally {
+      if (this.user) { try { localStorage.removeItem('agenda_admin_users_' + this.user.id); } catch (e) { } }
+      if (typeof AdminUsers !== 'undefined') AdminUsers.data = null;
       this.user = null;
       this.ready = false;
       this.pending.clear();

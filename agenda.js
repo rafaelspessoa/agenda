@@ -701,6 +701,7 @@ const ICONS = {
   menu: '<path d="M3 6h18M3 12h18M3 18h18"/>',
   x: '<path d="M18 6L6 18M6 6l12 12"/>',
   check: '<path d="M20 6L9 17l-5-5"/>',
+  refresh: '<path d="M21 12a9 9 0 1 1-2.64-6.36L21 8M21 3v5h-5"/>',
   alert: '<path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
   edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>',
   trash: '<path d="M3 6h18M8 6V4h8v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>',
@@ -1838,7 +1839,14 @@ const AdminUsers = {
   data: null,
   erro: '',
   carregando: null,
+  chave() { return 'agenda_admin_users_' + (Cloud.user ? Cloud.user.id : ''); },
+  // lista salva no navegador: a aba abre preenchida mesmo logo depois de recarregar a pagina
+  lerSalvo() {
+    if (this.data || !Cloud.user) return;
+    try { const salvo = JSON.parse(localStorage.getItem(this.chave()) || 'null'); if (salvo && Array.isArray(salvo.users)) this.data = salvo; } catch (e) { }
+  },
   usersHTML() {
+    this.lerSalvo();
     if (this.erro && !this.data) return `<p class="c-bad small">${esc(this.erro)}</p>`;
     if (!this.data) return '<p class="muted small">Carregando contas…</p>';
     const { users } = this.data;
@@ -1861,9 +1869,13 @@ const AdminUsers = {
     if (supplierTarget) supplierTarget.innerHTML = this.suppliersHTML();
   },
   carregar() {
+    this.lerSalvo();
     if (this.carregando) return this.carregando;
     this.carregando = Cloud.request('/api/users')
-      .then(({ users, suppliers }) => { this.data = { users, suppliers }; this.erro = ''; })
+      .then(({ users, suppliers }) => {
+        this.data = { users, suppliers }; this.erro = '';
+        try { localStorage.setItem(this.chave(), JSON.stringify(this.data)); } catch (e) { }
+      })
       .catch(error => { this.erro = error.message; if (this.data) toast(error.message, 'err'); })
       .finally(() => { this.carregando = null; this.paint(); });
     return this.carregando;
