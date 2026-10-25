@@ -168,8 +168,11 @@ const Cloud = {
     if (!this.ready) return;
     if (this.syncing) { this.refreshPending = true; return; }
     this.syncing = true;
+    const inicio = Date.now();
     try {
       const { records } = await this.request('/api/data');
+      // algo foi enviado enquanto esta consulta estava em andamento: a lista pode estar desatualizada; consulta de novo
+      if (this.lastSent >= inicio) { this.refreshPending = true; return; }
       const incoming = new Map(records.map(item => [`${item.store}:${item.id}`, item.payload]));
       let changed = false;
       for (const store of STORES) {
@@ -241,9 +244,13 @@ const Cloud = {
         } else if (item.action === 'clear') {
           await this.request('/api/data', { method: 'DELETE', body: { store: item.store, action: 'clear' } });
         } else if (item.action === 'bulk') {
-          await this.request('/api/data', { method: 'POST', body: { action: 'bulk', records: item.records } });
+          // em partes, para não passar do limite de tamanho da API
+          for (let index = 0; index < item.records.length; index += 200) {
+            await this.request('/api/data', { method: 'POST', body: { action: 'bulk', records: item.records.slice(index, index + 200) } });
+          }
         }
         this.pending.delete(key);
+        this.lastSent = Date.now();
         this.savePending();
       }
       this.error = '';
@@ -260,6 +267,8 @@ const Cloud = {
       }
     } finally { this.flushing = false; }
     if (rejected) await this.pullBuyerData();
+    // o que entrou na fila durante o envio segue logo em seguida, sem esperar a próxima consulta
+    else if (!this.error && this.pending.size) await this.flush();
   },
 
   async loadSupplier() {

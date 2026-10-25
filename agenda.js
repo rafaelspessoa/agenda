@@ -249,6 +249,15 @@ const DB = {
     });
   },
 
+  // grava sem redesenhar a tela, mas envia ao servidor (o modo silent sozinho é o da própria sincronização e não envia)
+  async putQuiet(store, obj) {
+    const gravando = this.put(store, obj, true);
+    // entra na fila antes de terminar a gravação local: a sincronização periódica não apaga o que está pendente
+    if (typeof Cloud !== 'undefined') Cloud.queue(store, 'put', this._clean(obj)).catch(() => {});
+    await gravando;
+    return obj;
+  },
+
   put(store, obj, silent) {
     if (!obj.id) obj.id = uid();
     DATA[store].set(obj.id, obj);
@@ -541,14 +550,14 @@ const Engine = {
     if (fechouAgora) d.concluidoEm = now;
     if (!STATUS_FECHADO.includes(d.status)) d.concluidoEm = null;
     if (d.status === 'Aguardando fornecedor' && (!antigo || antigo.status !== 'Aguardando fornecedor')) d.aguardandoDesde = today();
-    await DB.put('demandas', d, true);
+    await DB.putQuiet('demandas', d);
     if (!antigo) await log('Demanda', 'Novo agendamento: ' + d.titulo, { demandaId: d.id, labId: d.labId });
     if (fechouAgora) {
       await log(d.status === 'Concluído' ? 'Pendência resolvida' : 'Demanda', (d.status === 'Concluído' ? 'Concluída: ' : 'Cancelada: ') + d.titulo, { demandaId: d.id, labId: d.labId });
       if (d.status === 'Concluído' && d.recorrencia && d.recorrencia.tipo && d.recorrencia.tipo !== 'nenhuma') {
         const nx = this.proximaRecorrencia(d);
         if (nx) {
-          await DB.put('demandas', Object.assign({}, d, { id: uid(), data: nx, status: 'A fazer', concluidoEm: null, criadoEm: now, atualizadoEm: now, origem: 'recorrente' }), true);
+          await DB.putQuiet('demandas', Object.assign({}, d, { id: uid(), data: nx, status: 'A fazer', concluidoEm: null, criadoEm: now, atualizadoEm: now, origem: 'recorrente' }));
           toast('Próxima ocorrência agendada para ' + fmtDate(nx), 'info');
         }
       }
@@ -678,7 +687,7 @@ function minutesBetween(a, b) {
 async function log(tipo, descricao, extra) {
   const e = Object.assign({ id: uid(), data: new Date().toISOString(), tipo, descricao }, extra || {});
   if (e.labId && !e.labNome) e.labNome = Engine.labNome(e.labId);
-  await DB.put('historico', e, true);
+  await DB.putQuiet('historico', e);
   return e;
 }
 
@@ -1774,7 +1783,7 @@ async function doImport(tkey, rows, mode) {
   const now = new Date().toISOString();
   let novos = 0, atual = 0;
   const existentes = DB.all('laboratorios');
-  if (mode === 'replace') await DB.clear('laboratorios', true);
+  if (mode === 'replace') { await DB.clear('laboratorios', true); if (Cloud.ready) Cloud.queue('laboratorios', 'clear').catch(() => {}); }
   const base = mode === 'replace' ? [] : existentes;
   const ufOk = (l, r) => !l.uf || !r.uf || l.uf === r.uf;
   const find = r => base.find(l => r.codigo && l.codigo && String(l.codigo) === String(r.codigo) && ufOk(l, r))
@@ -1788,6 +1797,7 @@ async function doImport(tkey, rows, mode) {
     else { const l = Object.assign({ id: uid(), criadoEm: now }, r); base.push(l); list.push(l); novos++; }
   }
   await DB.bulkPut('laboratorios', list, true);
+  if (Cloud.ready) Cloud.queueBulk('laboratorios', list).catch(() => {});
   return { novos, atual };
 }
 
@@ -2761,7 +2771,8 @@ const Recep = {
       c.itens.push(Object.assign({}, d, { _local: true, compradorNome: nome }));
       vistos.add(d.id);
     });
-    if (a && !cols.has(localKey) && !Share.ok()) col(localKey, a.nome || a.usuario, { local: true });
+    // coluna vazia "neste computador" só faz sentido para comprador; a conta da recepção não tem agenda própria
+    if (a && !cols.has(localKey) && !Share.ok() && Cloud.user?.role !== 'reception') col(localKey, a.nome || a.usuario, { local: true });
     Share.remotos.forEach(r => {
       const ov = (Share.overlay[r.slug] || {}).itens || {};
       const c = col(r.slug, r.comprador || r.usuario || 'Comprador', {});
@@ -2873,7 +2884,7 @@ const Recep = {
       : `<button class="rp-share off" data-rp="share">${icon('folder')}<span>${Share.dir ? 'Reconectar pasta' : 'Conectar pasta compartilhada'}</span></button>`;
     const vazio = !fontes.length ? `<div class="fp-vazio rp-vazio">${icon('folder')}<b>Nenhum agendamento encontrado</b><span>${Cloud.user?.role === 'reception' ? 'Os atendimentos dos fornecedores aparecerão aqui quando forem agendados.' : Share.supported ? 'Conecte a pasta compartilhada usada pelos compradores para exibir os agendamentos.' : 'Abra este arquivo no Google Chrome ou Microsoft Edge para ver os agendamentos dos compradores.'}</span></div>` : '';
     el.innerHTML = `<header class="rp-top"><img src="${document.getElementById('brandLogo').src}" alt="Grupo Toureiro">
-        <div class="rp-title"><b>PAINEL DA RECEPÇÃO</b><span>Agendamentos de fornecedores · todos os compradores</span></div>
+        <div class="rp-title"><b>PAINEL DA RECEPÇÃO</b><span>Agendamentos de todos os compradores</span></div>
         ${shBtn}
         <div class="rp-date">${this.ic('total')}<div><span>${dn}</span><span>${esc(fmtDateLong(t).replace(/^[^,]*,\s*/, ''))}</span></div></div>
         <b class="rp-clockb" id="rpClock">${hm}</b>

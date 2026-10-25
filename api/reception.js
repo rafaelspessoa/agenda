@@ -20,7 +20,9 @@ export default async function handler(req, res) {
           'agendadoPor', r.payload->'agendadoPor', 'atend', r.payload->'atend', 'industrias', r.payload->'industrias'
         )) AS appointment
         FROM app_records r JOIN app_users u ON u.id = r.owner_id
-        WHERE r.store = 'demandas' AND u.role IN ('buyer', 'admin') AND r.payload->>'atend' = 'true'
+        WHERE r.store = 'demandas' AND u.role IN ('buyer', 'admin') AND u.active = TRUE
+          -- mesma regra da tela (naRecepcao): atendimentos de fornecedor e qualquer agendamento com horario
+          AND (r.payload->>'atend' = 'true' OR COALESCE(r.payload->>'hora', '') <> '')
           AND COALESCE(r.payload->>'status', '') <> 'Cancelado'
           AND r.payload->>'data' BETWEEN ${fromDate} AND ${toDate}
         ORDER BY r.payload->>'data', r.payload->>'hora' LIMIT 1000`;
@@ -38,7 +40,7 @@ export default async function handler(req, res) {
     }
     const rows = await sql`UPDATE app_records SET payload = payload || jsonb_build_object(${field}, ${value}), updated_at = NOW()
       WHERE owner_id = ${buyerId} AND store = 'demandas' AND record_id = ${id}
-        AND payload->>'atend' = 'true' RETURNING record_id`;
+        AND (payload->>'atend' = 'true' OR COALESCE(payload->>'hora', '') <> '') RETURNING record_id`;
     return rows.length ? respond(res, 200, { ok: true }) : respond(res, 404, { error: 'Atendimento nao encontrado.' });
   } catch (error) {
     console.error('reception endpoint failed', error);
