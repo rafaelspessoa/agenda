@@ -40,7 +40,14 @@ function parseISO(s) {
   if (!m) return null;
   return new Date(+m[1], +m[2] - 1, +m[3]);
 }
-function today() { return toISO(new Date()); }
+// datas e horários sempre no fuso America/Sao_Paulo, mesmo que o computador esteja em outro fuso
+const TZ = 'America/Sao_Paulo';
+const _fmtSP = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+function spParts(d) {
+  const p = {}; _fmtSP.formatToParts(d || new Date()).forEach(x => { p[x.type] = x.value; });
+  return { iso: p.year + '-' + p.month + '-' + p.day, hm: p.hour + ':' + p.minute, h: +p.hour };
+}
+function today() { return spParts().iso; }
 function addDays(s, n) { const d = parseISO(s); d.setDate(d.getDate() + n); return toISO(d); }
 function addMonths(s, n, dia) {
   const d = parseISO(s);
@@ -96,7 +103,9 @@ function fmtDateLong(s) {
 function fmtDateTime(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
-  return pad(d.getDate()) + '/' + pad(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  if (isNaN(d)) return '—';
+  const p = spParts(d);
+  return fmtDate(p.iso) + ' ' + p.hm;
 }
 function relDay(s) {
   if (!s) return '';
@@ -107,7 +116,7 @@ function relDay(s) {
   if (n < 0) return 'há ' + (-n) + ' dias';
   return 'em ' + n + ' dias';
 }
-function nowHM() { const d = new Date(); return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+function nowHM() { return spParts().hm; }
 
 /* ---------- números ---------- */
 function num(v) {
@@ -740,8 +749,10 @@ const App = {
     Sync.init();
     await Auth.gate();
     if (!Cloud.isBuyer()) return;
+    // envia as configuracoes so quando a carga inicial criou ou migrou algo (sem travar a abertura)
+    const cfgAntes = JSON.stringify(DB.all('config'));
     await Engine.seedIfEmpty();
-    await Cloud.queueBulk('config', DB.all('config'));
+    if (JSON.stringify(DB.all('config')) !== cfgAntes) Cloud.queueBulk('config', DB.all('config')).catch(() => {});
     await Backup.init();
     this.buildChrome();
     Auth.paintUser();
@@ -766,7 +777,9 @@ const App = {
   fromHash() {
     const h = decodeURIComponent(location.hash.slice(1));
     const [v, q] = h.split('?');
-    this.view = VIEWS[v] && (v !== 'usuarios' || Cloud.user?.role === 'admin') ? v : 'hoje';
+    // entrar no Cronograma por outra tela sempre abre o calendario do mes atual
+    if (v === 'cronograma' && this.view !== 'cronograma') { const cr = this.s('cronograma'); cr.mode = 'mes'; delete cr.date; }
+    this.view =VIEWS[v] && (v !== 'usuarios' || Cloud.user?.role === 'admin') ? v : 'hoje';
     this.params = Object.fromEntries(new URLSearchParams(q || ''));
     if (this.params.f) { // aplica filtro vindo de um link
       const st = this.s(this.view);
@@ -782,13 +795,19 @@ const App = {
     document.body.classList.remove('nav-open');
   },
 
-  buildChrome() {
+  // menu lateral conforme o perfil: "Administração" só para contas administrativas
+  buildNav() {
     const adminMode = Cloud.user?.role === 'admin';
     if (adminMode) AdminUsers.carregar();
     const groups = adminMode ? NAV.concat([{ grupo: 'Administração', itens: [['usuarios', 'Contas de acesso']] }]) : NAV;
     const nav = groups.map(g => `<div class="nav-group"><div class="nav-title">${g.grupo}</div>${g.itens.map(([k, t]) =>
       `<a href="#${k}" class="nav-item" data-view="${k}">${icon(k === 'usuarios' ? 'fornecedores' : k)}<span>${t}</span><b class="nav-count" id="nc-${k}"></b></a>`).join('')}</div>`).join('');
     document.getElementById('nav').innerHTML = nav;
+    if (this.view === 'usuarios' && !adminMode) this.go('hoje');
+  },
+
+  buildChrome() {
+    this.buildNav();
     document.getElementById('bottomnav').innerHTML = [['hoje', 'Hoje'], ['agendamentos', 'Agenda'], ['cronograma', 'Cronograma'], ['fornecedores', 'Fornecedor']].map(([k, t]) =>
       `<a href="#${k}" data-view="${k}">${icon(k)}<span>${t}</span></a>`).join('') + `<a data-act="toggle-nav">${icon('menu')}<span>Menu</span></a>`;
     const si = document.getElementById('gsearch');
@@ -1365,7 +1384,7 @@ VIEWS.hoje = {
     const itAm = Engine.itensDoDia(amanha, false);
     const hm = nowHM();
     const prox = sortBy(doDia.filter(i => i.hora && i.hora >= hm), i => i.hora)[0];
-    const h = new Date().getHours();
+    const h = spParts().h;
     const saud = (h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite') + (p.nomeUsuario ? ', ' + esc(p.nomeUsuario) : '');
     return pageHead('O que preciso fazer hoje?', saud + ' · ' + fmtDateLong(t), btn(icon('plus') + ' Agendar', 'new-demanda', '', 'primary')) +
       `<div class="chips">
@@ -1487,7 +1506,7 @@ VIEWS.cronograma = {
 ACTIONS['cr-tab'] = d => { App.s('cronograma').tab = d.t; App.render(); };
 
 function calendarioHTML(st) {
-  const mode = st.mode || (window.innerWidth < 700 ? 'semana' : 'mes');
+  const mode = st.mode || 'mes';
   const d = st.date || today();
   const t = today();
   const seg = ['dia', 'semana', 'mes'].map(m => `<button class="${mode === m ? 'on' : ''}" data-act="cal-mode" data-m="${m}">${m === 'mes' ? 'Mês' : m === 'semana' ? 'Semana' : 'Dia'}</button>`).join('');
@@ -1827,7 +1846,7 @@ VIEWS.usuarios = {
           <div class="fld span2"><label>Nome</label><input name="name" required></div>
           <div class="fld span2"><label>Usuário</label><input name="username" autocomplete="off" required></div>
           <div class="fld span2"><label>Perfil</label><select name="role"><option value="buyer">Comprador</option><option value="reception">Recepção</option></select></div>
-          <div class="fld span2"><label>Senha inicial (mínimo 10 caracteres)</label><input type="password" name="password" minlength="10" autocomplete="new-password" required></div>
+          <div class="fld span2"><label>Senha inicial (mínimo 6 caracteres)</label><input type="password" name="password" minlength="6" autocomplete="new-password" required></div>
           <div class="page-actions span4">${btn(icon('plus') + ' Criar acesso', 'admin-user-add', '', 'primary')}</div>
         </form></div><div class="card"><div class="card-h"><h3>Usuários cadastrados</h3><button class="icon-btn" data-act="admin-user-refresh" title="Atualizar">${icon('refresh')}</button></div><div id="adminUsers">${AdminUsers.usersHTML()}</div></div>
         <div class="card"><div class="card-h"><h3>Fornecedores de todos os compradores</h3><button class="icon-btn" data-act="admin-user-refresh" title="Atualizar">${icon('refresh')}</button></div><div id="adminSuppliers">${AdminUsers.suppliersHTML()}</div></div></div>`;
@@ -1909,12 +1928,12 @@ ACTIONS['admin-user-toggle'] = async data => {
 ACTIONS['admin-user-password'] = data => {
   openModal({
     title: 'Redefinir senha de ' + data.name,
-    body: '<div class="fld"><label>Nova senha (mínimo 10 caracteres)</label><input type="password" name="password" minlength="10" autocomplete="new-password" required></div>',
+    body: '<div class="fld"><label>Nova senha (mínimo 6 caracteres)</label><input type="password" name="password" minlength="6" autocomplete="new-password" required></div>',
     footer: '<button class="btn" data-close>Cancelar</button><button class="btn primary" data-save>Salvar nova senha</button>',
     onMount(el, close) {
       el.querySelector('[data-save]').addEventListener('click', async () => {
         const password = el.querySelector('[name=password]').value;
-        if (password.length < 10) return toast('A senha precisa ter pelo menos 10 caracteres.', 'warn');
+        if (password.length < 6) return toast('A senha precisa ter pelo menos 6 caracteres.', 'warn');
         try {
           await Cloud.request('/api/users', { method: 'PATCH', body: { id: data.id, password } });
           close(); toast('Senha redefinida. A pessoa precisara entrar novamente.', 'ok');
@@ -2774,7 +2793,7 @@ const Recep = {
     return Forn.min(d.hora) - Forn.min(nowHM()) <= 60 ? 'aguardando' : 'agendado';
   },
   atraso(d) { if (d.data !== today() || d.chegouEm || STATUS_FECHADO.includes(d.status)) return 0; const m = Forn.min(nowHM()) - Forn.min(d.hora); return m > 0 ? m : 0; },
-  hora(iso) { return iso ? new Date(iso).toTimeString().slice(0, 5) : ''; },
+  hora(iso) { return iso && !isNaN(new Date(iso)) ? spParts(new Date(iso)).hm : ''; },
   iniciais(n) { const p = String(n || '?').trim().split(/\s+/); return ((p[0] || '')[0] + (p.length > 1 ? p[p.length - 1][0] : (p[0] || '')[1] || '')).toUpperCase(); },
   CORES: ['#c8102e', '#1d7fd6', '#16a34a', '#7c3aed', '#ea580c', '#0f5f7a', '#be185d', '#4d7c0f'],
   ST_TXT: { agendado: 'Agendado', aguardando: 'Aguardando', recepcao: 'Na recepção', atendimento: 'Em atendimento', concluido: 'Concluído', cancelado: 'Cancelado' },
@@ -2891,7 +2910,8 @@ const Recep = {
     const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
     if (!(m >= 0)) return '';
     if (m < 1) return 'agora'; if (m < 60) return 'há ' + m + ' min';
-    return new Date(iso).toDateString() === new Date().toDateString() ? 'às ' + this.hora(iso) : 'em ' + fmtDateShort(toISO(new Date(iso)));
+    const dia = spParts(new Date(iso)).iso;
+    return dia === today() ? 'às ' + this.hora(iso) : 'em ' + fmtDateShort(dia);
   },
   async onClick(e) {
     const b = e.target.closest('[data-rp]'); if (!b) return;
@@ -3496,4 +3516,80 @@ ACTIONS['au-remove'] = async () => {
    ============================================================ */
 window.addEventListener('error', e => { console.error(e.error || e.message); });
 window.addEventListener('unhandledrejection', e => { console.error(e.reason); toast('Erro: ' + (e.reason && e.reason.message || e.reason), 'err'); });
-document.addEventListener('DOMContentLoaded', () => App.start());
+/* ---------- data e hora no padrão brasileiro: DD/MM/AAAA e HH:mm ----------
+   Os campos nativos seguem o idioma do navegador (podem mostrar AM/PM ou mês/dia).
+   Hora vira texto HH:mm (mesmo valor que o código já usa). Data ganha um campo
+   visível DD/MM/AAAA e o campo original fica oculto guardando AAAA-MM-DD. */
+const BRInput = {
+  isoToBR(v) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v || ''); return m ? m[3] + '/' + m[2] + '/' + m[1] : ''; },
+  brToISO(v) {
+    const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(v || ''); if (!m) return '';
+    const iso = m[3] + '-' + m[2] + '-' + m[1], d = parseISO(iso);
+    return d && toISO(d) === iso ? iso : '';
+  },
+  maskDate(v) { const n = v.replace(/\D/g, '').slice(0, 8); return n.length > 4 ? n.slice(0, 2) + '/' + n.slice(2, 4) + '/' + n.slice(4) : n.length > 2 ? n.slice(0, 2) + '/' + n.slice(2) : n; },
+  maskTime(v) { const n = v.replace(/\D/g, '').slice(0, 4); return n.length > 2 ? n.slice(0, 2) + ':' + n.slice(2) : n; },
+  // aceita 9, 930, 0930, 9:30, 14:30 → HH:mm; null quando inválido
+  normTime(v) {
+    const n = String(v || '').replace(/\D/g, ''); if (!n) return '';
+    const h = n.length <= 2 ? +n : n.length === 3 ? +n[0] : +n.slice(0, 2);
+    const m = n.length <= 2 ? 0 : n.length === 3 ? +n.slice(1) : +n.slice(2, 4);
+    return h <= 23 && m <= 59 ? pad(h) + ':' + pad(m) : null;
+  },
+  upgrade(root) {
+    if (!root || !root.querySelectorAll) return;
+    const list = root.matches && root.matches('input[type=date],input[type=time]') ? [root] : Array.from(root.querySelectorAll('input[type=date],input[type=time]'));
+    list.forEach(el => el.type === 'time' ? this.time(el) : this.date(el));
+  },
+  time(el) {
+    el.type = 'text';
+    el.classList.add('br-time');
+    el.setAttribute('inputmode', 'numeric'); el.setAttribute('maxlength', '5'); el.setAttribute('autocomplete', 'off');
+    if (!el.placeholder) el.placeholder = 'HH:mm';
+    if (!el.title) el.title = 'Formato HH:mm (ex.: 14:30)';
+  },
+  date(el) {
+    const vis = document.createElement('input');
+    vis.type = 'text'; vis.className = 'br-date ' + el.className;
+    vis.placeholder = 'DD/MM/AAAA'; vis.title = 'Formato DD/MM/AAAA (ex.: 24/10/2026)';
+    vis.setAttribute('inputmode', 'numeric'); vis.setAttribute('maxlength', '10'); vis.setAttribute('autocomplete', 'off');
+    if (el.title) vis.title = el.title;
+    vis.value = this.isoToBR(el.value);
+    el.type = 'hidden';
+    el.insertAdjacentElement('beforebegin', vis);
+    vis._iso = el;
+    // atribuições feitas pelo código (ex.: botões "amanhã") também atualizam o campo visível
+    const nativo = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+    Object.defineProperty(el, 'value', { configurable: true, get() { return nativo.get.call(this); }, set(v) { nativo.set.call(this, v); vis.value = BRInput.isoToBR(v); } });
+    el.focus = () => vis.focus();
+  },
+  init() {
+    document.addEventListener('input', e => {
+      const t = e.target;
+      if (t.classList && t.classList.contains('br-time')) t.value = this.maskTime(t.value);
+      else if (t._iso) {
+        t.value = this.maskDate(t.value);
+        const iso = this.brToISO(t.value);
+        if (iso && t._iso.value !== iso) t._iso.value = iso;
+      }
+    }, true);
+    // em captura: normaliza antes dos listeners de "change" de cada tela
+    document.addEventListener('change', e => {
+      const t = e.target;
+      if (t.classList && t.classList.contains('br-time')) {
+        const v = this.normTime(t.value);
+        if (v === null) { toast('Horário inválido. Use HH:mm (ex.: 14:30).', 'warn'); t.value = ''; } else t.value = v;
+      } else if (t._iso) {
+        e.stopPropagation();
+        const iso = t.value ? this.brToISO(t.value) : '';
+        if (t.value && !iso) toast('Data inválida. Use DD/MM/AAAA (ex.: 24/10/2026).', 'warn');
+        t._iso.value = iso;
+        t._iso.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    }, true);
+    this.upgrade(document.body);
+    new MutationObserver(muts => muts.forEach(m => m.addedNodes.forEach(n => { if (n.nodeType === 1) this.upgrade(n); }))).observe(document.body, { childList: true, subtree: true });
+  }
+};
+
+document.addEventListener('DOMContentLoaded', () => { BRInput.init(); App.start(); });

@@ -90,10 +90,12 @@ export async function clearLoginFailures(key) {
   await database()`DELETE FROM app_login_limits WHERE key_hash = ${hashToken(key)}`;
 }
 
-export async function createSession(res, user) {
+export async function createSession(res, user, clearKey) {
   const token = randomBytes(32).toString('base64url');
   const expiresAt = new Date(Date.now() + SESSION_HOURS * 60 * 60 * 1000);
-  await database()`INSERT INTO app_sessions (token_hash, user_id, expires_at)
+  // cria a sessao e limpa as tentativas falhas na mesma ida ao banco
+  await database()`WITH cleared AS (DELETE FROM app_login_limits WHERE key_hash = ${hashToken(clearKey || '')})
+    INSERT INTO app_sessions (token_hash, user_id, expires_at)
     VALUES (${hashToken(token)}, ${user.id}, ${expiresAt.toISOString()})`;
   const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
   res.setHeader('Set-Cookie', `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_HOURS * 60 * 60}${secure}`);

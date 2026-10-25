@@ -1,5 +1,5 @@
 import { database } from './_db.js';
-import { clearLoginFailures, createSession, currentUser, endSession, failedLogin, hashToken, loginLock, loginRolesForProfile, normalizeUsername, publicUser, requestBody, respond, sameOrigin, verifyPassword } from './_security.js';
+import { createSession, currentUser, endSession, failedLogin, hashToken, loginRolesForProfile, normalizeUsername, publicUser, requestBody, respond, sameOrigin, verifyPassword } from './_security.js';
 
 export default async function handler(req, res) {
   try {
@@ -17,18 +17,24 @@ export default async function handler(req, res) {
     }
 
     const sql = database();
-    let user;
+    let user, rateKey;
+    // bloqueio por tentativas e conta sao consultados na mesma ida ao banco
+    const retryIn = row => {
+      const until = row?.locked_until ? new Date(row.locked_until).getTime() : 0;
+      return until > Date.now() ? Math.ceil((until - Date.now()) / 1000) : 0;
+    };
     if (body.role === 'supplier') {
       const code = String(body.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
       if (code.length < 8 || code.length > 32) return respond(res, 401, { error: 'Codigo de fornecedor invalido.' });
-      const rateKey = 'supplier:' + code;
-      const retry = await loginLock(rateKey);
+      rateKey = 'supplier:' + code;
+      const [row] = await sql`SELECT l.locked_until, u.id, u.username, u.display_name, u.role, u.buyer_id, u.supplier_id
+        FROM (SELECT 1) AS one
+        LEFT JOIN app_login_limits l ON l.key_hash = ${hashToken(rateKey)}
+        LEFT JOIN LATERAL (SELECT * FROM app_users WHERE supplier_code_hash = ${hashToken(code)} AND active = TRUE LIMIT 1) u ON TRUE`;
+      const retry = retryIn(row);
       if (retry) return respond(res, 429, { error: `Muitas tentativas. Tente novamente em ${retry} segundos.` });
-      const rows = await sql`SELECT id, username, display_name, role, buyer_id, supplier_id
-        FROM app_users WHERE supplier_code_hash = ${hashToken(code)} AND active = TRUE LIMIT 1`;
-      user = rows[0];
-      if (!user) await failedLogin(rateKey);
-      else await clearLoginFailures(rateKey);
+      if (row.id) user = row;
+      else await failedLogin(rateKey);
     } else {
       const username = normalizeUsername(body.username);
       const expectedRole = String(body.role || '');
@@ -37,19 +43,19 @@ export default async function handler(req, res) {
         return respond(res, 400, { error: 'Informe usuario e senha validos.' });
       }
       if (!allowedRoles.length) return respond(res, 400, { error: 'Perfil de acesso invalido.' });
-      const rateKey = expectedRole + ':' + username;
-      const retry = await loginLock(rateKey);
+      rateKey = expectedRole + ':' + username;
+      const [row] = await sql`SELECT l.locked_until, u.id, u.username, u.display_name, u.role, u.buyer_id, u.supplier_id, u.password_hash
+        FROM (SELECT 1) AS one
+        LEFT JOIN app_login_limits l ON l.key_hash = ${hashToken(rateKey)}
+        LEFT JOIN LATERAL (SELECT * FROM app_users WHERE username_key = ${username} AND role = ANY(${allowedRoles}) AND active = TRUE LIMIT 1) u ON TRUE`;
+      const retry = retryIn(row);
       if (retry) return respond(res, 429, { error: `Muitas tentativas. Tente novamente em ${retry} segundos.` });
-      const rows = await sql`SELECT id, username, display_name, role, buyer_id, supplier_id, password_hash
-        FROM app_users WHERE username_key = ${username} AND role = ANY(${allowedRoles}) AND active = TRUE LIMIT 1`;
-      const candidate = rows[0];
-      if (candidate && allowedRoles.includes(candidate.role) && await verifyPassword(body.password, candidate.password_hash)) user = candidate;
-      if (!user) await failedLogin(rateKey);
-      else await clearLoginFailures(rateKey);
+      if (row.id && allowedRoles.includes(row.role) && await verifyPassword(body.password, row.password_hash)) user = row;
+      else await failedLogin(rateKey);
     }
 
     if (!user) return respond(res, 401, { error: 'Usuario, senha ou codigo incorretos.' });
-    await createSession(res, user);
+    await createSession(res, user, rateKey);
     return respond(res, 200, { user: publicUser(user) });
   } catch (error) {
     console.error('auth endpoint failed', error);

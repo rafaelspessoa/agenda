@@ -99,11 +99,17 @@ const Cloud = {
     await DB.setCfg('auth', profile, true);
 
     if (this.isBuyer(user)) {
-      try { await this.loadBuyerData(); }
-      catch (error) { await this.logout(); throw error; }
+      // dados desta conta ja estao neste navegador: libera a tela na hora e sincroniza em segundo plano
+      const cached = DB.cfg('cloudOwner', '') === user.id;
+      if (!cached) {
+        try { await this.loadBuyerData(); }
+        catch (error) { await this.logout(); throw error; }
+      }
       this.ready = true;
       this.startPolling();
       this.releaseGate(false);
+      if (typeof App !== 'undefined' && App.started) { App.buildNav(); Auth.paintUser(); App.render(); }
+      if (cached) this.flush().then(() => this.pullBuyerData());
       return;
     }
 

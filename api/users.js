@@ -33,7 +33,7 @@ export default async function handler(req, res) {
       let rows;
       if (body.password != null) {
         const password = String(body.password);
-        if (password.length < 10 || password.length > 256) return respond(res, 400, { error: 'A senha deve ter entre 10 e 256 caracteres.' });
+        if (password.length < 6 || password.length > 256) return respond(res, 400, { error: 'A senha deve ter entre 6 e 256 caracteres.' });
         rows = await database()`UPDATE app_users SET password_hash = ${await hashPassword(password)}
           WHERE id = ${String(body.id)} AND active = TRUE AND role <> 'supplier' RETURNING id`;
       } else {
@@ -88,8 +88,8 @@ export default async function handler(req, res) {
     const username = normalizeUsername(body.username);
     const password = String(body.password || '');
     const role = String(body.role || '');
-    if (!name || !/^[a-z0-9._-]{3,80}$/.test(username) || !['buyer', 'reception'].includes(role) || password.length < 10 || password.length > 256) {
-      return respond(res, 400, { error: 'Informe nome, usuario valido, perfil permitido e senha com ao menos 10 caracteres.' });
+    if (!name || !/^[a-z0-9._-]{3,80}$/.test(username) || !['buyer', 'reception'].includes(role) || password.length < 6 || password.length > 256) {
+      return respond(res, 400, { error: 'Informe nome, usuario valido, perfil permitido e senha com ao menos 6 caracteres.' });
     }
     const passwordHash = await hashPassword(password);
     const rows = await sql`INSERT INTO app_users (username, username_key, display_name, role, password_hash)
