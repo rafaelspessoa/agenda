@@ -783,6 +783,7 @@ const App = {
 
   buildChrome() {
     const adminMode = Cloud.user?.role === 'admin';
+    if (adminMode) AdminUsers.carregar();
     const groups = adminMode ? NAV.concat([{ grupo: 'Administração', itens: [['usuarios', 'Contas de acesso']] }]) : NAV;
     const nav = groups.map(g => `<div class="nav-group"><div class="nav-title">${g.grupo}</div>${g.itens.map(([k, t]) =>
       `<a href="#${k}" class="nav-item" data-view="${k}">${icon(k === 'usuarios' ? 'fornecedores' : k)}<span>${t}</span><b class="nav-count" id="nc-${k}"></b></a>`).join('')}</div>`).join('');
@@ -1827,29 +1828,48 @@ VIEWS.usuarios = {
           <div class="fld span2"><label>Perfil</label><select name="role"><option value="buyer">Comprador</option><option value="reception">Recepção</option></select></div>
           <div class="fld span2"><label>Senha inicial (mínimo 10 caracteres)</label><input type="password" name="password" minlength="10" autocomplete="new-password" required></div>
           <div class="page-actions span4">${btn(icon('plus') + ' Criar acesso', 'admin-user-add', '', 'primary')}</div>
-        </form></div><div class="card"><div class="card-h"><h3>Usuários cadastrados</h3><button class="icon-btn" data-act="admin-user-refresh" title="Atualizar">${icon('refresh')}</button></div><div id="adminUsers"><p class="muted small">Carregando contas…</p></div></div>
-        <div class="card"><div class="card-h"><h3>Fornecedores de todos os compradores</h3><button class="icon-btn" data-act="admin-user-refresh" title="Atualizar">${icon('refresh')}</button></div><div id="adminSuppliers"><p class="muted small">Carregando fornecedores…</p></div></div></div>`;
+        </form></div><div class="card"><div class="card-h"><h3>Usuários cadastrados</h3><button class="icon-btn" data-act="admin-user-refresh" title="Atualizar">${icon('refresh')}</button></div><div id="adminUsers">${AdminUsers.usersHTML()}</div></div>
+        <div class="card"><div class="card-h"><h3>Fornecedores de todos os compradores</h3><button class="icon-btn" data-act="admin-user-refresh" title="Atualizar">${icon('refresh')}</button></div><div id="adminSuppliers">${AdminUsers.suppliersHTML()}</div></div></div>`;
   },
   mount() { ACTIONS['admin-user-refresh']({}); }
 };
-ACTIONS['admin-user-refresh'] = async () => {
-  const target = document.getElementById('adminUsers');
-  const supplierTarget = document.getElementById('adminSuppliers');
-  if (!target && !supplierTarget) return;
-  if (target) target.innerHTML = '<p class="muted small">Carregando contas…</p>';
-  if (supplierTarget) supplierTarget.innerHTML = '<p class="muted small">Carregando fornecedores…</p>';
-  try {
-    const { users, suppliers } = await Cloud.request('/api/users');
-    if (target) target.innerHTML = users.length ? `<div class="tbl-wrap"><table class="tbl dense"><thead><tr><th>Nome</th><th>Usuário</th><th>Perfil</th><th>Estado</th><th></th></tr></thead><tbody>${users.map(user => `<tr><td>${esc(user.name)}</td><td>${esc(user.username)}</td><td>${esc(user.role)}</td><td>${user.active ? 'Ativo' : 'Inativo'}</td><td>${user.id === Cloud.user.id ? '' : `${user.active && user.role !== 'supplier' ? `<button class="btn xs" data-act="admin-user-password" data-id="${esc(user.id)}" data-name="${esc(user.name)}">Redefinir senha</button> ` : ''}<button class="btn xs ${user.active ? 'danger ghost' : ''}" data-act="admin-user-toggle" data-id="${esc(user.id)}" data-active="${user.active ? '0' : '1'}">${user.active ? 'Desativar' : 'Ativar'}</button>`}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">Nenhuma conta cadastrada.</p>';
-    if (supplierTarget) supplierTarget.innerHTML = suppliers.length ? `<div class="tbl-wrap"><table class="tbl dense"><thead><tr><th>Fornecedor</th><th>Comprador responsável</th><th>Indústrias</th><th>Estado</th></tr></thead><tbody>${suppliers.map(supplier => {
+// ultima lista carregada: a tela abre com ela na hora e atualiza em segundo plano
+const AdminUsers = {
+  data: null,
+  erro: '',
+  carregando: null,
+  usersHTML() {
+    if (this.erro && !this.data) return `<p class="c-bad small">${esc(this.erro)}</p>`;
+    if (!this.data) return '<p class="muted small">Carregando contas…</p>';
+    const { users } = this.data;
+    const perfil = { admin: 'Administrador', buyer: 'Comprador', reception: 'Recepção', supplier: 'Fornecedor' };
+    return users.length ? `<div class="tbl-wrap"><table class="tbl dense"><thead><tr><th>Nome</th><th>Usuário</th><th>Perfil</th><th>Estado</th><th></th></tr></thead><tbody>${users.map(user => `<tr><td>${esc(user.name)}</td><td>${esc(user.username)}</td><td>${esc(perfil[user.role] || user.role)}</td><td>${user.active ? 'Ativo' : 'Inativo'}</td><td>${user.id === Cloud.user.id ? '' : `${user.active && user.role !== 'supplier' ? `<button class="btn xs" data-act="admin-user-password" data-id="${esc(user.id)}" data-name="${esc(user.name)}">Redefinir senha</button> ` : ''}<button class="btn xs ${user.active ? 'danger ghost' : ''}" data-act="admin-user-toggle" data-id="${esc(user.id)}" data-active="${user.active ? '0' : '1'}">${user.active ? 'Desativar' : 'Ativar'}</button>`}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">Nenhuma conta cadastrada.</p>';
+  },
+  suppliersHTML() {
+    if (this.erro && !this.data) return `<p class="c-bad small">${esc(this.erro)}</p>`;
+    if (!this.data) return '<p class="muted small">Carregando fornecedores…</p>';
+    const { suppliers } = this.data;
+    return suppliers.length ? `<div class="tbl-wrap"><table class="tbl dense"><thead><tr><th>Fornecedor</th><th>Comprador responsável</th><th>Indústrias</th><th>Estado</th></tr></thead><tbody>${suppliers.map(supplier => {
       const industries = Array.isArray(supplier.industries) ? supplier.industries.map(item => typeof item === 'string' ? item : item.nome || '').filter(Boolean).join(', ') : '';
       return `<tr><td>${esc(supplier.name)}</td><td>${esc(supplier.buyerName)}</td><td>${esc(industries || '—')}</td><td>${supplier.active ? 'Ativo' : 'Inativo'}</td></tr>`;
     }).join('')}</tbody></table></div>` : '<p class="muted small">Nenhum fornecedor cadastrado.</p>';
-  } catch (error) {
-    if (target) target.innerHTML = `<p class="c-bad small">${esc(error.message)}</p>`;
-    if (supplierTarget) supplierTarget.innerHTML = `<p class="c-bad small">${esc(error.message)}</p>`;
+  },
+  paint() {
+    const target = document.getElementById('adminUsers');
+    const supplierTarget = document.getElementById('adminSuppliers');
+    if (target) target.innerHTML = this.usersHTML();
+    if (supplierTarget) supplierTarget.innerHTML = this.suppliersHTML();
+  },
+  carregar() {
+    if (this.carregando) return this.carregando;
+    this.carregando = Cloud.request('/api/users')
+      .then(({ users, suppliers }) => { this.data = { users, suppliers }; this.erro = ''; })
+      .catch(error => { this.erro = error.message; if (this.data) toast(error.message, 'err'); })
+      .finally(() => { this.carregando = null; this.paint(); });
+    return this.carregando;
   }
 };
+ACTIONS['admin-user-refresh'] = () => AdminUsers.carregar();
 ACTIONS['admin-user-add'] = async () => {
   const form = document.getElementById('adminUserForm'); if (!form) return;
   const button = form.querySelector('[data-act="admin-user-add"]');
