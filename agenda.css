@@ -757,6 +757,6 @@ input.br-date{font-variant-numeric:tabular-nums}
 }
 @media (max-height:560px){
   .au-brand{width:min(260px,70vw,30vh)}
-  .au-sub,.au-note,.au-foot{display:none}
+  .au-note,.au-foot{display:none}
   .au-card h1{font-size:17px;margin-bottom:8px}
 }

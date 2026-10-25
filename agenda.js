@@ -2369,7 +2369,7 @@ const Auth = {
     const roleSw = ['login', 'setup', 'forn', 'recep'].includes(mode) ? `<div class="au-role">${[['comp', 'COMERCIAL'], ['forn', 'FORNECEDOR'], ['recep', 'RECEPÇÃO']].map(([k, l]) => `<button type="button" data-au-role="${k}" class="${(k === this.role ? 'on' : '')}">${l}</button>`).join('')}</div>` : '';
     const eye = `<button type="button" class="au-eye" tabindex="-1" title="Mostrar/ocultar senha">${icon('eye')}</button>`;
     const pw = (name, label, ac) => `<label class="au-f"><span>${label}</span><div class="au-pw"><input type="password" name="${name}" autocomplete="${ac}" required>${eye}</div></label>`;
-    const head = (t, s) => `<img class="au-logo" src="${document.getElementById('appIcon').src}" alt=""><h1>${t}</h1><p class="au-sub">${s}</p>`;
+    const head = (t, s) => `<img class="au-logo" src="${document.getElementById('appIcon').src}" alt="">${t ? `<h1>${t}</h1>` : ''}<p class="au-sub">${s}</p>`;
     let body = '';
     if (mode === 'setup') body = head('Bem-vindo à sua Agenda', 'Primeiro acesso: crie o login que vai proteger a agenda neste computador.') + `
       <form id="auForm" autocomplete="off">
@@ -2381,7 +2381,7 @@ const Auth = {
         <button class="btn primary au-go" type="submit">Criar acesso e entrar</button>
         <p class="au-note">${icon('shield', 'xs')} A senha impede que outras pessoas abram a agenda neste computador. Ela é guardada criptografada e não vai junto com o backup.</p>
       </form>`;
-    else if (mode === 'login') body = head(a && a.nome ? 'Olá, ' + esc(a.nome.split(' ')[0]) : 'Entrar', 'Acesso da equipe · Agenda e Planejamento') + `
+    else if (mode === 'login') body = head('', 'Acesso ao sistema de agendamento') + `
       <form id="auForm" autocomplete="on">
         <label class="au-f"><span>Usuário</span><input name="usuario" value="${esc(a && a.usuario || '')}" autocomplete="username" autocapitalize="none" required></label>
         ${pw('senha', 'Senha', 'current-password')}
