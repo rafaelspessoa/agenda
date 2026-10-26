@@ -2355,6 +2355,8 @@ const Auth = {
   paintUser() {
     const a = this.cfg(), el = document.getElementById('userBox'); if (!el) return;
     el.innerHTML = a ? `<span class="u-av">${esc((a.nome || a.usuario).trim().charAt(0).toUpperCase())}</span><span class="u-n">${esc(a.nome || a.usuario)}</span>` : '';
+    // abaixo do logo na barra lateral: nome de quem está logado
+    const sub = document.querySelector('.brand-sub'); if (sub) sub.textContent = a ? (a.nome || a.usuario) : 'Agenda e Planejamento';
     el.hidden = !a;
     const lb = document.getElementById('lockBtn'); if (lb) lb.hidden = !a;
   },
