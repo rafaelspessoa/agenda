@@ -12,7 +12,7 @@ export default async function handler(req, res) {
     if (req.method === 'GET') {
       const fromDate = shiftDate(localDate(), -1);
       const toDate = shiftDate(localDate(), 120);
-      const rows = await sql`SELECT r.owner_id AS "buyerId", u.display_name AS "buyerName", r.record_id AS id,
+      const rows = await sql`SELECT r.owner_id AS "buyerId", u.display_name AS "buyerName", u.departments AS "buyerDepartments", r.record_id AS id,
         jsonb_strip_nulls(jsonb_build_object(
           'id', r.record_id, 'data', r.payload->'data', 'hora', r.payload->'hora', 'horaFim', r.payload->'horaFim',
           'titulo', r.payload->'titulo', 'fornNome', r.payload->'fornNome', 'assunto', r.payload->'assunto',

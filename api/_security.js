@@ -119,7 +119,7 @@ function sessionToken(req) {
 export async function currentUser(req) {
   const token = sessionToken(req);
   if (!token) return null;
-  const rows = await database()`SELECT u.id, u.username, u.display_name, u.role, u.buyer_id, u.supplier_id
+  const rows = await database()`SELECT u.id, u.username, u.display_name, u.role, u.buyer_id, u.supplier_id, u.departments
     FROM app_sessions s JOIN app_users u ON u.id = s.user_id
     WHERE s.token_hash = ${hashToken(token)} AND s.expires_at > NOW() AND u.active = TRUE`;
   return rows[0] || null;
@@ -139,7 +139,7 @@ export async function endSession(req, res) {
 }
 
 export function publicUser(user) {
-  return { id: user.id, username: user.username, name: user.display_name, role: user.role, buyerId: user.buyer_id, supplierId: user.supplier_id };
+  return { id: user.id, username: user.username, name: user.display_name, role: user.role, buyerId: user.buyer_id, supplierId: user.supplier_id, departments: user.departments || [] };
 }
 
 export async function revokeSessions(userId) {

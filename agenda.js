@@ -10,6 +10,22 @@ const PRIO_RANK = { URGENTE: 0, ALTA: 1, MEDIA: 2, BAIXA: 3 };
 
 const STATUS = ['A fazer', 'Em andamento', 'Aguardando fornecedor', 'Concluído', 'Cancelado'];
 const STATUS_FECHADO = ['Concluído', 'Cancelado'];
+// departamentos dos compradores (código -> nome); identificam o comprador nas telas
+const DEPARTAMENTOS = {
+  1: 'HIGIENE E BELEZA', 2: 'LIMPEZA', 3: 'MEDICAMENTOS', 4: 'HORTIFRUTI', 5: 'BOMBONIERE',
+  6: 'BEBIDAS', 7: 'FOGOS', 8: 'PAPELARIA', 9: 'MERCEARIA DOCE', 10: 'LAZER',
+  11: 'VETERINARIOS', 12: 'PETSHOP', 13: 'MERCEARIA SALGADA', 14: 'FRIOS', 15: 'PADARIA',
+  16: 'BAZAR', 17: 'UTILIDADES', 19: 'ARMARINHO', 20: 'BRINQUEDOS E JOGOS', 21: 'FESTAS/DESCARTAVEIS',
+  22: 'INFORMATICA E ELETRONICOS', 23: 'MATERIAL DE CONSTRUCAO', 24: 'AUTOMOTIVO', 25: 'JARDINAGEM', 26: 'LATICINIOS',
+  27: 'CACA E PESCA', 28: 'COMMODITY', 29: 'ADEGA', 30: 'ALIMENTOS SAUDAVEIS', 31: 'PANIFICACAO'
+};
+function deptTxt(codes) { return (Array.isArray(codes) ? codes : []).map(c => DEPARTAMENTOS[c]).filter(Boolean).join(', '); }
+// caixas de seleção dos departamentos (name="dep")
+function deptChecks(sel) {
+  const on = new Set((sel || []).map(Number));
+  return `<div class="dep-checks">${Object.entries(DEPARTAMENTOS).map(([c, n]) => `<label class="chk"><input type="checkbox" name="dep" value="${c}" ${on.has(+c) ? 'checked' : ''}> <b>${c}</b> ${esc(n)}</label>`).join('')}</div>`;
+}
+function deptValue(root) { return Array.from(root.querySelectorAll('input[name=dep]:checked')).map(i => +i.value); }
 const STATUS_CLASS = { 'A fazer': 'st-todo', 'Em andamento': 'st-negoc', 'Aguardando fornecedor': 'st-aguarda', 'Concluído': 'st-ok', 'Cancelado': 'st-cancel' };
 // conversão de status da versão anterior
 const STATUS_MIGRA = { 'Em análise': 'Em andamento', 'Em negociação': 'Em andamento', 'Pedido realizado': 'Aguardando fornecedor', 'Aguardando faturamento': 'Aguardando fornecedor', 'Parcialmente faturado': 'Aguardando fornecedor', 'Faturado': 'Concluído' };
@@ -861,13 +877,14 @@ const App = {
     const sameView = main.dataset.view === this.view;
     // preserva o que ja foi digitado em formularios quando a mesma tela e redesenhada
     const drafts = sameView ? Array.from(main.querySelectorAll('form[id] [name]')).filter(el => el.type !== 'file')
-      .map(el => ({ form: el.form && el.form.id, name: el.name, value: el.value, checked: el.checked, radio: el.type === 'radio', focus: el === document.activeElement })) : [];
+      .map(el => ({ form: el.form && el.form.id, name: el.name, value: el.value, checked: el.checked, radio: el.type === 'radio' || el.type === 'checkbox', focus: el === document.activeElement })) : [];
     try {
       main.innerHTML = v.render(this.s(this.view), this.params);
       if (v.mount) v.mount(this.s(this.view), main);
       drafts.forEach(d => {
-        const sel = `#${CSS.escape(d.form)} [name="${CSS.escape(d.name)}"]` + (d.radio ? `[value="${CSS.escape(d.value)}"]` : '');
-        const el = d.form && main.querySelector(sel);
+        const base = `#${CSS.escape(d.form)} [name="${CSS.escape(d.name)}"]`;
+        // várias opções com o mesmo nome: acha pela opção (value); sem atributo value, pelo nome
+        const el = d.form && (d.radio ? main.querySelector(base + `[value="${CSS.escape(d.value)}"]`) || main.querySelector(base + `:not([value])`) : main.querySelector(base));
         if (!el) return;
         if (el.type === 'checkbox' || el.type === 'radio') el.checked = d.checked; else el.value = d.value;
         if (d.focus) el.focus();
@@ -1913,10 +1930,16 @@ VIEWS.usuarios = {
           <div class="fld span2"><label>Usuário</label><input name="username" autocomplete="off" required></div>
           <div class="fld span2"><label>Perfil</label><select name="role"><option value="buyer">Comprador</option><option value="reception">Recepção</option></select></div>
           <div class="fld span2"><label>Senha inicial (mínimo 6 caracteres)</label><input type="password" name="password" minlength="6" autocomplete="new-password" required></div>
+          <div class="fld span4 dep-fld"><label>Departamentos do comprador (escolha um ou mais)</label>${deptChecks([])}</div>
           <div class="page-actions span4">${btn(icon('plus') + ' Criar acesso', 'admin-user-add', '', 'primary')}</div>
         </form></div><div class="card"><div class="card-h"><h3>Usuários cadastrados</h3><button class="icon-btn" data-act="admin-user-refresh" title="Atualizar">${icon('refresh')}</button></div><div id="adminUsers">${AdminUsers.usersHTML()}</div></div></div>`;
   },
-  mount() { ACTIONS['admin-user-refresh']({}); }
+  mount(st, main) {
+    ACTIONS['admin-user-refresh']({});
+    // departamentos só para comprador
+    const f = main.querySelector('#adminUserForm'), role = f && f.querySelector('[name=role]');
+    if (role) { const upd = () => { f.querySelector('.dep-fld').style.display = role.value === 'buyer' ? '' : 'none'; }; role.addEventListener('change', upd); upd(); }
+  }
 };
 // ultima lista carregada: a tela abre com ela na hora e atualiza em segundo plano
 const AdminUsers = {
@@ -1935,7 +1958,7 @@ const AdminUsers = {
     if (!this.data) return '<p class="muted small">Carregando contas…</p>';
     const { users } = this.data;
     const perfil = { admin: 'Administrador', buyer: 'Comprador', reception: 'Recepção', supplier: 'Fornecedor' };
-    return users.length ? `<div class="tbl-wrap"><table class="tbl dense"><thead><tr><th>Nome</th><th>Usuário</th><th>Perfil</th><th>Estado</th><th></th></tr></thead><tbody>${users.map(user => `<tr><td>${esc(user.name)}</td><td>${esc(user.username)}</td><td>${esc(perfil[user.role] || user.role)}</td><td>${user.active ? 'Ativo' : 'Inativo'}</td><td>${user.id === Cloud.user.id ? '' : `${user.active && user.role !== 'supplier' ? `<button class="btn xs" data-act="admin-user-password" data-id="${esc(user.id)}" data-name="${esc(user.name)}">Redefinir senha</button> ` : ''}<button class="btn xs ${user.active ? 'danger ghost' : ''}" data-act="admin-user-toggle" data-id="${esc(user.id)}" data-active="${user.active ? '0' : '1'}">${user.active ? 'Desativar' : 'Ativar'}</button>`}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">Nenhuma conta cadastrada.</p>';
+    return users.length ? `<div class="tbl-wrap"><table class="tbl dense"><thead><tr><th>Nome</th><th>Usuário</th><th>Perfil</th><th>Departamentos</th><th>Estado</th><th></th></tr></thead><tbody>${users.map(user => `<tr><td>${esc(user.name)}</td><td>${esc(user.username)}</td><td>${esc(perfil[user.role] || user.role)}</td><td class="small">${['buyer', 'admin'].includes(user.role) ? (deptTxt(user.departments) ? esc(deptTxt(user.departments)) : '<span class="c-bad">não informado</span>') + ` <button class="btn xs" data-act="admin-user-deps" data-id="${esc(user.id)}">Alterar</button>` : '—'}</td><td>${user.active ? 'Ativo' : 'Inativo'}</td><td>${user.id === Cloud.user.id ? '' : `${user.active && user.role !== 'supplier' ? `<button class="btn xs" data-act="admin-user-password" data-id="${esc(user.id)}" data-name="${esc(user.name)}">Redefinir senha</button> ` : ''}<button class="btn xs ${user.active ? 'danger ghost' : ''}" data-act="admin-user-toggle" data-id="${esc(user.id)}" data-active="${user.active ? '0' : '1'}">${user.active ? 'Desativar' : 'Ativar'}</button>`}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">Nenhuma conta cadastrada.</p>';
   },
   paint() {
     const target = document.getElementById('adminUsers');
@@ -1963,12 +1986,37 @@ ACTIONS['admin-user-add'] = async () => {
   button.disabled = true;
   button.textContent = 'Salvando…';
   const data = Object.fromEntries(new FormData(form));
+  delete data.dep;
+  if (data.role === 'buyer') {
+    data.departments = deptValue(form);
+    if (!data.departments.length) { button.innerHTML = originalLabel; button.disabled = false; return toast('Escolha ao menos um departamento do comprador.', 'warn'); }
+  }
   try {
     await Cloud.request('/api/users', { method: 'POST', body: data });
     form.reset(); toast('Acesso criado.', 'ok');
     await ACTIONS['admin-user-refresh']({});
   } catch (error) { toast(error.message, 'err'); }
   finally { if (button.isConnected) { button.innerHTML = originalLabel; button.disabled = false; } }
+};
+ACTIONS['admin-user-deps'] = d => {
+  const u = ((AdminUsers.data || {}).users || []).find(x => x.id === d.id); if (!u) return;
+  openModal({
+    title: 'Departamentos de ' + u.name,
+    body: deptChecks(u.departments),
+    footer: '<button class="btn" data-close>Cancelar</button><button class="btn primary" data-save>Salvar</button>',
+    onMount(el, close) {
+      el.querySelector('[data-save]').addEventListener('click', async () => {
+        const departments = deptValue(el);
+        if (!departments.length) return toast('Escolha ao menos um departamento.', 'warn');
+        try {
+          await Cloud.request('/api/users', { method: 'PATCH', body: { id: u.id, departments } });
+          close(); toast('Departamentos atualizados.', 'ok');
+          if (u.id === Cloud.user.id) { Cloud.user.departments = departments; Auth.paintUser(); }
+          await ACTIONS['admin-user-refresh']({});
+        } catch (error) { toast(error.message, 'err'); }
+      });
+    }
+  });
 };
 ACTIONS['admin-user-toggle'] = async data => {
   const active = data.active === '1';
@@ -2356,7 +2404,11 @@ const Auth = {
     const a = this.cfg(), el = document.getElementById('userBox'); if (!el) return;
     el.innerHTML = a ? `<span class="u-av">${esc((a.nome || a.usuario).trim().charAt(0).toUpperCase())}</span><span class="u-n">${esc(a.nome || a.usuario)}</span>` : '';
     // abaixo do logo na barra lateral: nome de quem está logado
-    const sub = document.querySelector('.brand-sub'); if (sub) sub.textContent = a ? (a.nome || a.usuario) : 'Agenda e Planejamento';
+    const sub = document.querySelector('.brand-sub');
+    if (sub) {
+      const deps = deptTxt(Cloud.user && Cloud.user.departments);
+      sub.innerHTML = a ? esc(a.nome || a.usuario) + (deps ? `<small class="brand-dep">${esc(deps)}</small>` : '') : 'Agenda e Planejamento';
+    }
     el.hidden = !a;
     const lb = document.getElementById('lockBtn'); if (lb) lb.hidden = !a;
   },
@@ -2447,7 +2499,7 @@ const Auth = {
             // o mesmo código atende mais de um comprador: escolhe com qual agendar
             const box = ff.querySelector('#auEscolha');
             box.innerHTML = '<span>Com qual comprador você quer agendar?</span>' + user.choose.map(c =>
-              `<button type="button" class="btn" data-uid="${esc(c.buyerId)}">${icon('fornecedores')} ${esc(c.buyerName)}</button>`).join('');
+              `<button type="button" class="btn" data-uid="${esc(c.buyerId)}">${icon('fornecedores')} <span>${esc(c.buyerName)}${deptTxt(c.departments) ? `<small class="dep-sub">${esc(deptTxt(c.departments))}</small>` : ''}</span></button>`).join('');
             box.hidden = false; msg('');
             box.querySelectorAll('[data-uid]').forEach(b => b.addEventListener('click', async () => {
               box.querySelectorAll('button').forEach(x => { x.disabled = true; });
@@ -2719,7 +2771,7 @@ const Forn = {
     // comprador desta sessão; com o mesmo código o fornecedor pode atender outros compradores e trocar aqui
     const snap = Cloud.supplierSnapshot || {}, compradores = snap.buyers || [];
     const nomeComprador = snap.buyerName || (Cloud.user ? '' : (a && a.nome)) || 'Comprador';
-    const troca = compradores.length > 1 ? `<label class="fp-troca">Comprador <select id="fpTroca">${compradores.map(c => `<option value="${esc(c.buyerId)}" ${c.buyerId === snap.buyerId ? 'selected' : ''}>${esc(c.buyerName)}</option>`).join('')}</select></label>` : '';
+    const troca = compradores.length > 1 ? `<label class="fp-troca">Comprador <select id="fpTroca">${compradores.map(c => `<option value="${esc(c.buyerId)}" ${c.buyerId === snap.buyerId ? 'selected' : ''}>${esc(c.buyerName + (deptTxt(c.departments) ? ' — ' + deptTxt(c.departments) : ''))}</option>`).join('')}</select></label>` : '';
     el.innerHTML = `<header class="fp-top"><img src="${document.getElementById('brandLogo').src}" alt="Grupo Toureiro"><div class="fp-tt"><b>Área do fornecedor</b><span>Agenda de atendimento de <b>${esc(nomeComprador)}</b></span></div>
         ${troca}<div class="fp-user"><span class="u-av">${esc(f.nome.charAt(0).toUpperCase())}</span><span>${esc(this.label(f))}</span><button class="btn sm" data-fp="sair">${icon('lock')} Sair</button></div></header>
       <div class="fp-body">
@@ -2939,7 +2991,7 @@ const Recep = {
       const s = this.status(d), inds = Forn.indsAtend(d), atr = this.atraso(d);
       const info = s === 'recepcao' ? 'Chegou às ' + this.hora(d.chegouEm) : s === 'atendimento' ? (d.chegouEm ? 'Chegou às ' + this.hora(d.chegouEm) + ' · ' : '') + 'previsto até ' + (d.horaFim || '') : s === 'concluido' && d.finalizouEm ? 'Finalizado às ' + this.hora(d.finalizouEm) : atr ? 'Atrasado ' + atr + ' min' : (d.horaFim ? 'até ' + d.horaFim : '');
       return `<div class="rp-card ${s}" style="--cc:${corDe(d.compradorNome)}">
-        <div class="rp-buyer"><i></i>${esc(this.comprador(d))}</div>
+        <div class="rp-buyer"><i></i>${esc(this.comprador(d))}${d.compradorDeps ? `<span class="rp-dep">· ${esc(d.compradorDeps)}</span>` : ''}</div>
         <div class="rp-ch"><b class="rp-time">${esc(d.hora || '--:--')}${d.horaFim ? `<small> – ${esc(d.horaFim)}</small>` : ''}</b><span class="rp-pill ${s}">${this.ST_TXT[s]}</span></div>
         <div class="rp-forn">${esc(d.fornNome || d.titulo || 'Agendamento')}</div>
         ${inds.length === 1 ? `<div class="rp-lab">${esc(inds[0])}</div>` : inds.length ? `<div class="rp-inds">${inds.map(n => `<span>${esc(n)}</span>`).join('')}</div>` : ''}

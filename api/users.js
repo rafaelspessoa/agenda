@@ -1,4 +1,5 @@
 import { database } from './_db.js';
+import { cleanDepartments } from './_departments.js';
 import { hashPassword, normalizeUsername, publicUser, requireUser, requestBody, respond, revokeSessions, sameOrigin } from './_security.js';
 
 function validName(value) {
@@ -12,9 +13,9 @@ export default async function handler(req, res) {
       const admin = await requireUser(req, res, ['admin']);
       if (!admin) return;
       // contas internas (os acessos de laboratório são criados sozinhos pelo código do laboratório)
-      const rows = await database()`SELECT id, username, display_name, role, active, buyer_id FROM app_users WHERE role <> 'supplier' ORDER BY role, display_name`;
+      const rows = await database()`SELECT id, username, display_name, role, active, buyer_id, departments FROM app_users WHERE role <> 'supplier' ORDER BY role, display_name`;
       return respond(res, 200, {
-        users: rows.map(user => ({ id: user.id, username: user.username, name: user.display_name, role: user.role, active: user.active, buyerId: user.buyer_id }))
+        users: rows.map(user => ({ id: user.id, username: user.username, name: user.display_name, role: user.role, active: user.active, buyerId: user.buyer_id, departments: user.departments || [] }))
       });
     }
     if (req.method === 'PATCH') {
@@ -22,6 +23,13 @@ export default async function handler(req, res) {
       const admin = await requireUser(req, res, ['admin']);
       if (!admin) return;
       const body = requestBody(req);
+      if (body.departments != null) {
+        const departments = cleanDepartments(body.departments);
+        if (!departments || !departments.length) return respond(res, 400, { error: 'Escolha ao menos um departamento valido.' });
+        const updated = await database()`UPDATE app_users SET departments = ${JSON.stringify(departments)}::jsonb
+          WHERE id = ${String(body.id || '')} AND role IN ('buyer', 'admin') RETURNING id`;
+        return updated.length ? respond(res, 200, { ok: true, departments }) : respond(res, 404, { error: 'Comprador nao encontrado.' });
+      }
       if (!body.id || body.id === admin.id) return respond(res, 400, { error: 'Conta invalida.' });
       let rows;
       if (body.password != null) {
@@ -51,10 +59,12 @@ export default async function handler(req, res) {
     if (!name || !/^[a-z0-9._-]{3,80}$/.test(username) || !['buyer', 'reception'].includes(role) || password.length < 6 || password.length > 256) {
       return respond(res, 400, { error: 'Informe nome, usuario valido, perfil permitido e senha com ao menos 6 caracteres.' });
     }
+    const departments = role === 'buyer' ? cleanDepartments(body.departments) : [];
+    if (role === 'buyer' && (!departments || !departments.length)) return respond(res, 400, { error: 'Escolha ao menos um departamento do comprador.' });
     const passwordHash = await hashPassword(password);
-    const rows = await sql`INSERT INTO app_users (username, username_key, display_name, role, password_hash)
-      VALUES (${username}, ${username}, ${name}, ${role}, ${passwordHash})
-      RETURNING id, username, display_name, role, buyer_id, supplier_id`;
+    const rows = await sql`INSERT INTO app_users (username, username_key, display_name, role, password_hash, departments)
+      VALUES (${username}, ${username}, ${name}, ${role}, ${passwordHash}, ${JSON.stringify(departments)}::jsonb)
+      RETURNING id, username, display_name, role, buyer_id, supplier_id, departments`;
     return respond(res, 201, { user: publicUser(rows[0]) });
   } catch (error) {
     if (error.code === '23505') return respond(res, 409, { error: 'Ja existe uma conta ou convite com esse usuario.' });

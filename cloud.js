@@ -439,7 +439,7 @@ const Cloud = {
     appointments.forEach(item => {
       const key = item.buyerId;
       if (!buyers.has(key)) buyers.set(key, { slug: key, comprador: item.buyerName, usuario: key, itens: [], geradoEm: new Date().toISOString() });
-      buyers.get(key).itens.push(Object.assign({}, item.appointment, { compradorNome: item.buyerName, _slug: key }));
+      buyers.get(key).itens.push(Object.assign({}, item.appointment, { compradorNome: item.buyerName, compradorDeps: deptTxt(item.buyerDepartments), _slug: key }));
     });
     Share.remotos = Array.from(buyers.values());
     Share.overlay = {};

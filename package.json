@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "check": "node --check api/_db.js && node --check api/_security.js && node --check api/auth.js && node --check api/data.js && node --check api/users.js && node --check api/reception.js && node --check api/suppliers.js && node --check api/labs.js && node --check api/_realtime.js && node --check scripts/bootstrap-admin.mjs && node --check scripts/apply-schema.mjs",
+    "check": "node --check api/_db.js && node --check api/_security.js && node --check api/auth.js && node --check api/data.js && node --check api/users.js && node --check api/reception.js && node --check api/suppliers.js && node --check api/labs.js && node --check api/_departments.js && node --check api/_realtime.js && node --check scripts/bootstrap-admin.mjs && node --check scripts/apply-schema.mjs",
     "bootstrap:admin": "node scripts/bootstrap-admin.mjs",
     "db:apply": "node scripts/apply-schema.mjs",
     "test": "node --test"

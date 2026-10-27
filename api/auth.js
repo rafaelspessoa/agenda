@@ -62,7 +62,7 @@ export default async function handler(req, res) {
           (SELECT max(locked_until) FROM app_login_limits WHERE key_hash IN (${hashToken(rateKey)}, ${hashToken(ipKey)})) AS locked_until,
           (SELECT json_build_object('id', id, 'nome', payload->>'nome') FROM labs WHERE code_key = ${code}) AS lab,
           -- só os compradores que têm este laboratório em "meus laboratórios"
-          COALESCE((SELECT json_agg(json_build_object('buyerId', u.id, 'buyerName', u.display_name) ORDER BY u.display_name)
+          COALESCE((SELECT json_agg(json_build_object('buyerId', u.id, 'buyerName', u.display_name, 'departments', u.departments) ORDER BY u.display_name)
             FROM labs l JOIN lab_buyers lb ON lb.lab_id = l.id JOIN app_users u ON u.id = lb.buyer_id
             WHERE l.code_key = ${code} AND u.role IN ('buyer', 'admin') AND u.active = TRUE), '[]'::json) AS buyers`;
       const retry = retryIn(row);
@@ -85,7 +85,7 @@ export default async function handler(req, res) {
       }
       if (!allowedRoles.length) return respond(res, 400, { error: 'Perfil de acesso invalido.' });
       rateKey = expectedRole + ':' + username;
-      const [row] = await sql`SELECT l.locked_until, u.id, u.username, u.display_name, u.role, u.buyer_id, u.supplier_id, u.password_hash
+      const [row] = await sql`SELECT l.locked_until, u.id, u.username, u.display_name, u.role, u.buyer_id, u.supplier_id, u.departments, u.password_hash
         FROM (SELECT 1) AS one
         LEFT JOIN app_login_limits l ON l.key_hash = ${hashToken(rateKey)}
         LEFT JOIN LATERAL (SELECT * FROM app_users WHERE username_key = ${username} AND role = ANY(${allowedRoles}) AND active = TRUE LIMIT 1) u ON TRUE`;
