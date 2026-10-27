@@ -2990,11 +2990,16 @@ const Recep = {
     const card = d => {
       const s = this.status(d), inds = Forn.indsAtend(d), atr = this.atraso(d);
       const info = s === 'recepcao' ? 'Chegou às ' + this.hora(d.chegouEm) : s === 'atendimento' ? (d.chegouEm ? 'Chegou às ' + this.hora(d.chegouEm) + ' · ' : '') + 'previsto até ' + (d.horaFim || '') : s === 'concluido' && d.finalizouEm ? 'Finalizado às ' + this.hora(d.finalizouEm) : atr ? 'Atrasado ' + atr + ' min' : (d.horaFim ? 'até ' + d.horaFim : '');
+      // fornecedor: quem agendou pela área do fornecedor ou o laboratório vinculado ao agendamento
+      const forn = d.fornNome || d.labNome || (d.labId && Engine.labNome(d.labId)) || '';
+      const titulo = d.titulo && !/^Atendimento fornecedor:/.test(d.titulo) && norm(d.titulo) !== norm(forn) ? d.titulo : '';
+      const outrasInds = inds.filter(n => norm(n) !== norm(forn));
       return `<div class="rp-card ${s}" style="--cc:${corDe(d.compradorNome)}">
-        <div class="rp-buyer"><i></i>${esc(this.comprador(d))}${d.compradorDeps ? `<span class="rp-dep">· ${esc(d.compradorDeps)}</span>` : ''}</div>
         <div class="rp-ch"><b class="rp-time">${esc(d.hora || '--:--')}${d.horaFim ? `<small> – ${esc(d.horaFim)}</small>` : ''}</b><span class="rp-pill ${s}">${this.ST_TXT[s]}</span></div>
-        <div class="rp-forn">${esc(d.fornNome || d.titulo || 'Agendamento')}</div>
-        ${inds.length === 1 ? `<div class="rp-lab">${esc(inds[0])}</div>` : inds.length ? `<div class="rp-inds">${inds.map(n => `<span>${esc(n)}</span>`).join('')}</div>` : ''}
+        <div class="rp-forn"><small>Fornecedor</small>${esc(forn || 'Não informado')}</div>
+        ${titulo ? `<div class="rp-tit">${esc(titulo)}</div>` : ''}
+        <dl class="rp-quem"><dt>Comprador</dt><dd><i></i>${esc(this.comprador(d))}</dd><dt>Departamento</dt><dd>${esc(d.compradorDeps || 'Não informado')}</dd></dl>
+        ${outrasInds.length === 1 ? `<div class="rp-lab">${esc(outrasInds[0])}</div>` : outrasInds.length ? `<div class="rp-inds">${outrasInds.map(n => `<span>${esc(n)}</span>`).join('')}</div>` : ''}
         <div class="rp-ass">${d.assunto ? 'Assunto: ' + esc(d.assunto) : '&nbsp;'}</div>
         <div class="rp-meta ${atr && s !== 'recepcao' ? 'late' : ''}">${esc(info)}${s === 'recepcao' ? ` <a data-rp="voltar" data-id="${d.id}" title="Desfazer a chegada">desfazer</a>` : ''}</div>
         ${avisoTxt(d)}

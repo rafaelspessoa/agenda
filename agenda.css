@@ -768,3 +768,11 @@ input.br-date{font-variant-numeric:tabular-nums}
 .dep-sub{display:block;font-size:11px;color:var(--muted);font-weight:500;margin-top:1px}
 .au-escolha .btn span{display:flex;flex-direction:column;align-items:flex-start;text-align:left}
 .rp-dep{font-weight:600;color:#6b7280;margin-left:2px;text-transform:none;letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* recepção: fornecedor, comprador e departamento em cada cartão */
+.rp-forn small{display:block;font-size:10.5px;font-weight:700;letter-spacing:.06em;color:#6b7280;margin-bottom:1px}
+.rp-tit{font-size:13px;color:#374151;margin-top:-1px}
+.rp-quem{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;margin:6px 0 2px;padding:6px 8px;border-radius:8px;background:color-mix(in srgb,var(--cc,#9ca3af) 7%,#fff);font-size:12.5px}
+.rp-quem dt{font-weight:700;color:#6b7280;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;align-self:center}
+.rp-quem dd{margin:0;font-weight:700;color:#111827;display:flex;align-items:center;gap:6px;min-width:0}
+.rp-quem dd i{width:9px;height:9px;border-radius:50%;background:var(--cc,#9ca3af);flex:none}

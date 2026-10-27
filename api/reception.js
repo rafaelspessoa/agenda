@@ -18,9 +18,12 @@ export default async function handler(req, res) {
           'titulo', r.payload->'titulo', 'fornNome', r.payload->'fornNome', 'assunto', r.payload->'assunto',
           'status', r.payload->'status', 'chegouEm', r.payload->'chegouEm', 'iniciouEm', r.payload->'iniciouEm',
           'finalizouEm', r.payload->'finalizouEm', 'avisoEm', r.payload->'avisoEm', 'avisoVistoEm', r.payload->'avisoVistoEm',
-          'agendadoPor', r.payload->'agendadoPor', 'atend', r.payload->'atend', 'industrias', r.payload->'industrias'
+          'agendadoPor', r.payload->'agendadoPor', 'atend', r.payload->'atend', 'industrias', r.payload->'industrias',
+          -- fornecedor do agendamento: o laboratório vinculado (quando o comprador agenda) ou quem agendou
+          'labNome', l.payload->'nome'
         )) AS appointment
         FROM app_records r JOIN app_users u ON u.id = r.owner_id
+        LEFT JOIN labs l ON l.id = COALESCE(NULLIF(r.payload->>'labId', ''), NULLIF(r.payload->>'fornId', ''))
         WHERE r.store = 'demandas' AND u.role IN ('buyer', 'admin') AND u.active = TRUE
           -- mesma regra da tela (naRecepcao): atendimentos de fornecedor e qualquer agendamento com horario
           AND (r.payload->>'atend' = 'true' OR COALESCE(r.payload->>'hora', '') <> '')
