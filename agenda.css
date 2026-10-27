@@ -776,3 +776,7 @@ input.br-date{font-variant-numeric:tabular-nums}
 .rp-quem dt{font-weight:700;color:#6b7280;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;align-self:center}
 .rp-quem dd{margin:0;font-weight:700;color:#111827;display:flex;align-items:center;gap:6px;min-width:0}
 .rp-quem dd i{width:9px;height:9px;border-radius:50%;background:var(--cc,#9ca3af);flex:none}
+.rp-fornecedor{display:flex;flex-direction:column;margin:2px 0 4px;padding:6px 8px;border-left:3px solid var(--brand2,#c8102e);background:#fff;border-radius:6px}
+.rp-fornecedor small{font-size:10.5px;font-weight:700;letter-spacing:.06em;color:#6b7280;text-transform:uppercase}
+.rp-fornecedor b{font-size:14.5px;color:#111827;line-height:1.25;text-transform:uppercase}
+.rp-fornecedor.vazio b{color:#9ca3af;font-weight:600}

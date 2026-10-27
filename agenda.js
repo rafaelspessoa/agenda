@@ -2992,15 +2992,17 @@ const Recep = {
       const info = s === 'recepcao' ? 'Chegou às ' + this.hora(d.chegouEm) : s === 'atendimento' ? (d.chegouEm ? 'Chegou às ' + this.hora(d.chegouEm) + ' · ' : '') + 'previsto até ' + (d.horaFim || '') : s === 'concluido' && d.finalizouEm ? 'Finalizado às ' + this.hora(d.finalizouEm) : atr ? 'Atrasado ' + atr + ' min' : (d.horaFim ? 'até ' + d.horaFim : '');
       // fornecedor: quem agendou pela área do fornecedor ou o laboratório vinculado ao agendamento
       const forn = d.fornNome || d.labNome || (d.labId && Engine.labNome(d.labId)) || '';
-      const titulo = d.titulo && !/^Atendimento fornecedor:/.test(d.titulo) && norm(d.titulo) !== norm(forn) ? d.titulo : '';
+      // assunto em destaque: o título do agendamento (o automático "Atendimento fornecedor: …" dá lugar ao assunto digitado)
+      const autoTitulo = /^Atendimento fornecedor:/.test(d.titulo || '');
+      const assunto = (!autoTitulo && d.titulo) || d.assunto || 'Atendimento';
       const outrasInds = inds.filter(n => norm(n) !== norm(forn));
       return `<div class="rp-card ${s}" style="--cc:${corDe(d.compradorNome)}">
         <div class="rp-ch"><b class="rp-time">${esc(d.hora || '--:--')}${d.horaFim ? `<small> – ${esc(d.horaFim)}</small>` : ''}</b><span class="rp-pill ${s}">${this.ST_TXT[s]}</span></div>
-        <div class="rp-forn"><small>Fornecedor</small>${esc(forn || 'Não informado')}</div>
-        ${titulo ? `<div class="rp-tit">${esc(titulo)}</div>` : ''}
-        <dl class="rp-quem"><dt>Comprador</dt><dd><i></i>${esc(this.comprador(d))}</dd><dt>Departamento</dt><dd>${esc(d.compradorDeps || 'Não informado')}</dd></dl>
+        <div class="rp-forn">${esc(assunto)}</div>
+        <div class="rp-fornecedor ${forn ? '' : 'vazio'}"><small>Fornecedor</small><b>${esc(forn || 'Não informado')}</b></div>
         ${outrasInds.length === 1 ? `<div class="rp-lab">${esc(outrasInds[0])}</div>` : outrasInds.length ? `<div class="rp-inds">${outrasInds.map(n => `<span>${esc(n)}</span>`).join('')}</div>` : ''}
-        <div class="rp-ass">${d.assunto ? 'Assunto: ' + esc(d.assunto) : '&nbsp;'}</div>
+        <dl class="rp-quem"><dt>Comprador</dt><dd><i></i>${esc(this.comprador(d))}</dd><dt>Departamento</dt><dd>${esc(d.compradorDeps || 'Não informado')}</dd></dl>
+        ${d.assunto && d.assunto !== assunto ? `<div class="rp-ass">Assunto: ${esc(d.assunto)}</div>` : ''}
         <div class="rp-meta ${atr && s !== 'recepcao' ? 'late' : ''}">${esc(info)}${s === 'recepcao' ? ` <a data-rp="voltar" data-id="${d.id}" title="Desfazer a chegada">desfazer</a>` : ''}</div>
         ${avisoTxt(d)}
         ${d.data > t && (s === 'agendado' || s === 'aguardando') ? `<div class="rp-btn done">${this.ic('total')} Agendado para ${DIAS_CURTO[weekday(d.data)]} ${fmtDateShort(d.data)}</div>` : BTN[s] ? BTN[s](d) : ''}</div>`;
