@@ -127,6 +127,7 @@ const Cloud = {
       Realtime.stop();
       if (this.user) { try { localStorage.removeItem('agenda_admin_users_' + this.user.id); } catch (e) { } }
       if (typeof AdminUsers !== 'undefined') AdminUsers.data = null;
+      if (typeof Equipe !== 'undefined') { Equipe.chave = ''; Equipe.itens = []; }
       this.user = null;
       this.ready = false;
       this.pending.clear();
@@ -449,6 +450,12 @@ const Cloud = {
     Share.remotos = Array.from(buyers.values());
     Share.overlay = {};
     Share.lidoEm = new Date().toISOString();
+  },
+
+  // relatório da gerência: agendamentos dos compradores da gerência no período
+  async teamReport(de, ate) {
+    const { appointments } = await this.request('/api/reception?de=' + encodeURIComponent(de) + '&ate=' + encodeURIComponent(ate));
+    return appointments.map(item => Object.assign({}, item.appointment, { compradorId: item.buyerId, compradorNome: item.buyerName }));
   },
 
   async markReception(buyerId, id, state) {

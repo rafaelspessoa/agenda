@@ -19,12 +19,16 @@ const DEPARTAMENTOS = {
   22: 'INFORMATICA E ELETRONICOS', 23: 'MATERIAL DE CONSTRUCAO', 24: 'AUTOMOTIVO', 25: 'JARDINAGEM', 26: 'LATICINIOS',
   27: 'CACA E PESCA', 28: 'COMMODITY', 29: 'ADEGA', 30: 'ALIMENTOS SAUDAVEIS', 31: 'PANIFICACAO'
 };
+const CARGOS = { admin: 'Administrador', buyer: 'Comprador', purchase_manager: 'Gerente de compras', category_manager: 'Gerente de categoria', reception: 'Recepção', supplier: 'Fornecedor' };
 function deptTxt(codes) { return (Array.isArray(codes) ? codes : []).map(c => DEPARTAMENTOS[c]).filter(Boolean).join(', '); }
 // caixas de seleção dos departamentos (name="dep")
-function deptChecks(sel) {
-  const on = new Set((sel || []).map(Number));
-  return `<div class="dep-checks">${Object.entries(DEPARTAMENTOS).map(([c, n]) => `<label class="chk"><input type="checkbox" name="dep" value="${c}" ${on.has(+c) ? 'checked' : ''}> <b>${c}</b> ${esc(n)}</label>`).join('')}</div>`;
+// only: departamentos que podem ser escolhidos (gerente de categoria); vazio = todos
+function deptChecks(sel, only) {
+  const on = new Set((sel || []).map(Number)), ok = only ? new Set(only.map(Number)) : null;
+  return `<div class="dep-checks">${Object.entries(DEPARTAMENTOS).filter(([c]) => !ok || ok.has(+c)).map(([c, n]) => `<label class="chk"><input type="checkbox" name="dep" value="${c}" ${on.has(+c) ? 'checked' : ''}> <b>${c}</b> ${esc(n)}</label>`).join('')}</div>`;
 }
+// departamentos que o gerente de categoria administra (null = todos)
+function deptScope() { return Cloud.user && Cloud.user.role === 'category_manager' ? (Cloud.user.departments || []).map(Number) : null; }
 function deptValue(root) { return Array.from(root.querySelectorAll('input[name=dep]:checked')).map(i => +i.value); }
 const STATUS_CLASS = { 'A fazer': 'st-todo', 'Em andamento': 'st-negoc', 'Aguardando fornecedor': 'st-aguarda', 'Concluído': 'st-ok', 'Cancelado': 'st-cancel' };
 // conversão de status da versão anterior
@@ -804,7 +808,7 @@ const App = {
     const [v, q] = h.split('?');
     // entrar no Cronograma por outra tela sempre abre o calendario do mes atual
     if (v === 'cronograma' && this.view !== 'cronograma') { const cr = this.s('cronograma'); cr.mode = 'mes'; delete cr.date; }
-    this.view =VIEWS[v] && (v !== 'usuarios' || Cloud.user?.role === 'admin') ? v : 'hoje';
+    this.view = VIEWS[v] && (v !== 'usuarios' || Cloud.user?.role === 'admin' || Cloud.isManager()) && (v !== 'equipe' || Cloud.isManager()) ? v : 'hoje';
     this.params = Object.fromEntries(new URLSearchParams(q || ''));
     if (this.params.f) { // aplica filtro vindo de um link
       const st = this.s(this.view);
@@ -827,9 +831,9 @@ const App = {
     const groups = adminMode ? NAV.concat([{ grupo: 'Administração', itens: [['usuarios', 'Contas de acesso']] }]) : NAV;
     const nav = groups.map(g => `<div class="nav-group"><div class="nav-title">${g.grupo}</div>${g.itens.map(([k, t]) =>
       `<a href="#${k}" class="nav-item" data-view="${k}">${icon(k === 'usuarios' ? 'fornecedores' : k)}<span>${t}</span><b class="nav-count" id="nc-${k}"></b></a>`).join('')}</div>`).join('');
-    const gerencia = Cloud.isManager() ? `<div class="nav-group"><div class="nav-title">Gerência</div><a class="nav-item" data-act="painel-gerencia">${icon('fornecedores')}<span>Painel da gerência</span></a></div>` : '';
+    const gerencia = Cloud.isManager() ? `<div class="nav-group"><div class="nav-title">Gerência</div><a href="#equipe" class="nav-item" data-view="equipe">${icon('agendamentos')}<span>Relatório da equipe</span><b class="nav-count" id="nc-equipe"></b></a><a class="nav-item" data-act="painel-gerencia">${icon('fornecedores')}<span>Painel da gerência</span></a><a href="#usuarios" class="nav-item" data-view="usuarios">${icon('fornecedores')}<span>Compradores</span><b class="nav-count" id="nc-usuarios"></b></a></div>` : '';
     document.getElementById('nav').innerHTML = nav + gerencia;
-    if (this.view === 'usuarios' && !adminMode) this.go('hoje');
+    if (this.view === 'usuarios' && !adminMode && !Cloud.isManager()) this.go('hoje');
   },
 
   buildChrome() {
@@ -1529,6 +1533,86 @@ ACTIONS['exp-demandas'] = () => exportRows('agendamentos', demandasFiltradas(App
   'Repetição': (REC_OPTS.find(r => r[0] === (d.recorrencia || {}).tipo) || ['', ''])[1], 'Observações': d.descricao || '', 'Concluída em': d.concluidoEm ? fmtDateTime(d.concluidoEm) : ''
 })));
 
+/* ---------------- RELATÓRIO DA EQUIPE (gerentes) ---------------- */
+// gerente de compras: todos os compradores; gerente de categoria: compradores dos seus departamentos (filtrado no servidor)
+const Equipe = {
+  chave: '', itens: [], carregando: false, erro: '',
+  async carregar(de, ate) {
+    const chave = de + '|' + ate;
+    if (this.carregando || this.chave === chave) return;
+    this.carregando = true; this.erro = '';
+    try { this.itens = await Cloud.teamReport(de, ate); this.chave = chave; }
+    catch (error) { this.erro = error.message; this.chave = chave; this.itens = []; }
+    finally { this.carregando = false; }
+    if (App.view === 'equipe') App.render();
+  },
+  periodo(st) {
+    const t = today();
+    let de = st.de || t.slice(0, 8) + '01', ate = st.ate || t;
+    if (ate < de) ate = de;
+    return [de, ate];
+  },
+  situacao(d) { return Recep.status(d); },
+  filtrados(st) {
+    const sit = st.status || 'concluido';
+    let arr = this.itens.filter(d => sit === 'todos' || (sit === 'abertos' ? this.situacao(d) !== 'concluido' : this.situacao(d) === sit));
+    if (st.comprador) arr = arr.filter(d => d.compradorId === st.comprador);
+    if (st.q) arr = arr.filter(d => matchText(d, st.q, ['compradorNome', 'labNome', 'fornNome', 'assunto', 'titulo', 'descricao']));
+    return arr;
+  },
+  fim(d) { return d.finalizouEm || d.concluidoEm || ''; },
+  duracao(d) {
+    if (!d.iniciouEm || !d.finalizouEm) return '';
+    const m = Math.round((new Date(d.finalizouEm) - new Date(d.iniciouEm)) / 60000);
+    return m >= 0 ? (m >= 60 ? Math.floor(m / 60) + 'h' + String(m % 60).padStart(2, '0') : m + ' min') : '';
+  }
+};
+VIEWS.equipe = {
+  title: 'Relatório da equipe',
+  render(st) {
+    const [de, ate] = Equipe.periodo(st);
+    if (Equipe.chave !== de + '|' + ate) Equipe.carregar(de, ate);
+    const arr = Equipe.filtrados(st);
+    const compradores = sortBy(Array.from(new Map(Equipe.itens.map(d => [d.compradorId, d.compradorNome])).entries()), c => norm(c[1]));
+    const conc = arr.filter(d => Equipe.situacao(d) === 'concluido').length;
+    const escopo = Cloud.user.role === 'purchase_manager' ? 'Todos os compradores' : 'Compradores de ' + (deptTxt(Cloud.user.departments) || 'nenhum departamento');
+    const sub = Equipe.carregando && Equipe.chave !== de + '|' + ate ? 'Carregando…' : Equipe.erro ? `<span class="c-bad">${esc(Equipe.erro)}</span>`
+      : `${arr.length} agendamento(s) · ${conc} concluído(s) · ${esc(escopo)}`;
+    const filtros = filterBar('equipe', st, [
+      `<label class="small muted">De <input type="date" data-f="de" value="${de}"></label>`,
+      `<label class="small muted">Até <input type="date" data-f="ate" value="${ate}"></label>`,
+      `<select data-f="status">${optList([['concluido', 'Concluídos'], ['abertos', 'Não concluídos'], ['todos', 'Todos']], st.status || 'concluido')}</select>`,
+      fSelect('comprador', st, compradores, 'Todos os compradores'),
+      fInput('q', st, 'Fornecedor, assunto…')
+    ]);
+    const cols = [
+      { k: 'data', t: 'Data', f: d => fmtDate(d.data) },
+      { k: 'hora', t: 'Horário', f: d => esc((d.hora || '') + (d.horaFim ? '–' + d.horaFim : '')) },
+      { k: 'compradorNome', t: 'Comprador' },
+      { k: 'labNome', t: 'Fornecedor', sv: d => d.labNome || d.fornNome || '', f: d => esc(d.labNome || d.fornNome || '') },
+      { k: 'assunto', t: 'Assunto', sv: d => d.assunto || d.titulo || '', f: d => esc(d.assunto || d.titulo || '') },
+      { k: 'chegouEm', t: 'Chegada', f: d => Recep.hora(d.chegouEm) },
+      { k: 'iniciouEm', t: 'Início', f: d => Recep.hora(d.iniciouEm) },
+      { k: 'fim', t: 'Fim', sv: d => Equipe.fim(d), f: d => Recep.hora(Equipe.fim(d)) },
+      { k: 'duracao', t: 'Duração', nosort: true, f: d => Equipe.duracao(d) },
+      { k: 'situacao', t: 'Situação', sv: d => Equipe.situacao(d), f: d => esc(Recep.ST_TXT[Equipe.situacao(d)] || '') }
+    ];
+    return pageHead('Relatório da equipe', sub, btn(icon('download') + ' Exportar', 'exp-equipe') + btn('Atualizar', 'equipe-atualizar')) + filtros +
+      `<div class="card flush">${table(cols, arr, { state: st, view: 'equipe', limit: 1000, empty: Equipe.carregando ? 'Carregando…' : 'Nenhum agendamento no período com esses filtros.' })}</div>`;
+  },
+  mount(st, main) { mountFilters(main, 'equipe'); }
+};
+ACTIONS['equipe-atualizar'] = () => { Equipe.chave = ''; App.render(); };
+ACTIONS['exp-equipe'] = () => {
+  const st = App.s('equipe'), [de, ate] = Equipe.periodo(st);
+  exportRows('agendamentos_equipe_' + de + '_a_' + ate, sortBy(Equipe.filtrados(st), d => d.data, d => d.hora || '').map(d => ({
+    'Data': fmtDate(d.data), 'Horário': d.hora || '', 'Término previsto': d.horaFim || '', 'Comprador': d.compradorNome || '',
+    'Fornecedor': d.labNome || d.fornNome || '', 'Assunto': d.assunto || d.titulo || '', 'Indústrias': Array.isArray(d.industrias) ? d.industrias.join(', ') : (d.industrias || ''),
+    'Chegada': Recep.hora(d.chegouEm), 'Início': Recep.hora(d.iniciouEm), 'Fim': Recep.hora(Equipe.fim(d)), 'Duração': Equipe.duracao(d),
+    'Situação': Recep.ST_TXT[Equipe.situacao(d)] || '', 'Agendado por': d.agendadoPor || '', 'Observações': d.descricao || ''
+  })));
+};
+
 /* ---------------- CRONOGRAMA ---------------- */
 function eventosPeriodo(de, ate) {
   const ev = [];
@@ -1926,35 +2010,40 @@ VIEWS.dados = {
 VIEWS.usuarios = {
   title: 'Contas de acesso',
   render() {
-    return pageHead('Contas de acesso', 'Crie os acessos da equipe e desative contas que não devem mais entrar.') +
-      `<div class="cols2"><div class="card"><h3>Novo acesso interno</h3><form class="grid-form" id="adminUserForm" onsubmit="return false">
+    const gerente = Cloud.isManager();
+    const perfis = gerente ? '<option value="buyer">Comprador</option>'
+      : '<option value="buyer">Comprador</option><option value="purchase_manager">Gerente de compras</option><option value="category_manager">Gerente de categoria</option><option value="reception">Recepção</option>';
+    return (gerente ? pageHead('Compradores', 'Cadastre os compradores da sua gerência, redefina senhas e desative quem não deve mais entrar.')
+      : pageHead('Contas de acesso', 'Crie os acessos da equipe e desative contas que não devem mais entrar.')) +
+      `<div class="cols2"><div class="card"><h3>${gerente ? 'Novo comprador' : 'Novo acesso interno'}</h3><form class="grid-form" id="adminUserForm" onsubmit="return false">
           <div class="fld span2"><label>Nome</label><input name="name" required></div>
           <div class="fld span2"><label>Usuário</label><input name="username" autocomplete="off" required></div>
-          <div class="fld span2"><label>Perfil</label><select name="role"><option value="buyer">Comprador</option><option value="purchase_manager">Gerente de compras</option><option value="category_manager">Gerente de categoria</option><option value="reception">Recepção</option></select></div>
+          <div class="fld span2"><label>Perfil</label><select name="role">${perfis}</select></div>
           <div class="fld span2"><label>Senha inicial (mínimo 6 caracteres)</label><input type="password" name="password" minlength="6" autocomplete="new-password" required></div>
-          <div class="fld span4 dep-fld"><label class="dep-lbl">Departamentos do comprador (escolha um ou mais)</label>${deptChecks([])}</div>
+          <div class="fld span4 dep-fld"><label class="dep-lbl">Departamentos do comprador (escolha um ou mais)</label>${deptChecks([], deptScope())}</div>
           <div class="page-actions span4">${btn(icon('plus') + ' Criar acesso', 'admin-user-add', '', 'primary')}</div>
-        </form></div><div class="card"><div class="card-h"><h3>Usuários cadastrados</h3><button class="icon-btn" data-act="admin-user-refresh" title="Atualizar">${icon('refresh')}</button></div><div id="adminUsers">${AdminUsers.usersHTML()}</div></div></div>`;
+        </form></div><div class="card"><div class="card-h"><h3>${gerente ? 'Compradores da gerência' : 'Usuários cadastrados'}</h3><button class="icon-btn" data-act="admin-user-refresh" title="Atualizar">${icon('refresh')}</button></div><div id="adminUsers">${AdminUsers.usersHTML()}</div></div></div>`;
   },
   mount(st, main) {
     ACTIONS['admin-user-refresh']({});
     // departamentos só para comprador
     const f = main.querySelector('#adminUserForm'), role = f && f.querySelector('[name=role]');
-    if (role) {
-      // comprador e gerente de categoria escolhem; gerente de compras já vem com todos (fixo); recepção não tem
-      const upd = () => {
-        const v = role.value, fld = f.querySelector('.dep-fld');
-        fld.style.display = v === 'reception' ? 'none' : '';
-        fld.querySelector('.dep-lbl').textContent = v === 'purchase_manager' ? 'Departamentos: gerente de compras acompanha todos'
-          : v === 'category_manager' ? 'Departamentos da gerência (escolha um ou mais)' : 'Departamentos do comprador (escolha um ou mais)';
-        fld.querySelectorAll('input[name=dep]').forEach(i => { if (v === 'purchase_manager') i.checked = true; i.disabled = v === 'purchase_manager'; });
-        if (fld.dataset.prev === 'purchase_manager' && v !== 'purchase_manager') fld.querySelectorAll('input[name=dep]').forEach(i => { i.checked = false; });
-        fld.dataset.prev = v;
-      };
-      role.addEventListener('change', upd); upd();
-    }
+    if (role) ligarPerfil(f, role);
   }
 };
+// comprador e gerente de categoria escolhem; gerente de compras já vem com todos (fixo); recepção não tem
+function ligarPerfil(f, role) {
+  const upd = () => {
+    const v = role.value, fld = f.querySelector('.dep-fld');
+    fld.style.display = v === 'reception' ? 'none' : '';
+    fld.querySelector('.dep-lbl').textContent = v === 'purchase_manager' ? 'Departamentos: gerente de compras acompanha todos'
+      : v === 'category_manager' ? 'Departamentos da gerência (escolha um ou mais)' : 'Departamentos do comprador (escolha um ou mais)';
+    fld.querySelectorAll('input[name=dep]').forEach(i => { if (v === 'purchase_manager') i.checked = true; i.disabled = v === 'purchase_manager'; });
+    if (fld.dataset.prev === 'purchase_manager' && v !== 'purchase_manager') fld.querySelectorAll('input[name=dep]').forEach(i => { i.checked = false; });
+    fld.dataset.prev = v;
+  };
+  role.addEventListener('change', upd); upd();
+}
 // ultima lista carregada: a tela abre com ela na hora e atualiza em segundo plano
 const AdminUsers = {
   data: null,
@@ -1972,7 +2061,7 @@ const AdminUsers = {
     if (!this.data) return '<p class="muted small">Carregando contas…</p>';
     const { users } = this.data;
     const perfil = { admin: 'Administrador', buyer: 'Comprador', reception: 'Recepção', supplier: 'Fornecedor', purchase_manager: 'Gerente de compras', category_manager: 'Gerente de categoria' };
-    return users.length ? `<div class="tbl-wrap"><table class="tbl dense"><thead><tr><th>Nome</th><th>Usuário</th><th>Perfil</th><th>Departamentos</th><th>Estado</th><th></th></tr></thead><tbody>${users.map(user => `<tr><td>${esc(user.name)}</td><td>${esc(user.username)}</td><td>${esc(perfil[user.role] || user.role)}</td><td class="small">${user.role === 'purchase_manager' ? 'Todos os departamentos' : ['buyer', 'admin', 'category_manager'].includes(user.role) ? (deptTxt(user.departments) ? esc(deptTxt(user.departments)) : '<span class="c-bad">não informado</span>') + ` <button class="btn xs" data-act="admin-user-deps" data-id="${esc(user.id)}">Alterar</button>` : '—'}</td><td>${user.active ? 'Ativo' : 'Inativo'}</td><td>${user.id === Cloud.user.id ? '' : `${user.active && user.role !== 'supplier' ? `<button class="btn xs" data-act="admin-user-password" data-id="${esc(user.id)}" data-name="${esc(user.name)}">Redefinir senha</button> ` : ''}<button class="btn xs ${user.active ? 'danger ghost' : ''}" data-act="admin-user-toggle" data-id="${esc(user.id)}" data-active="${user.active ? '0' : '1'}">${user.active ? 'Desativar' : 'Ativar'}</button>`}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">Nenhuma conta cadastrada.</p>';
+    return users.length ? `<div class="tbl-wrap"><table class="tbl dense"><thead><tr><th>Nome</th><th>Usuário</th><th>Perfil</th><th>Departamentos</th><th>Estado</th><th></th></tr></thead><tbody>${users.map(user => `<tr><td>${esc(user.name)}</td><td>${esc(user.username)}</td><td>${esc(perfil[user.role] || user.role)}</td><td class="small">${user.role === 'purchase_manager' ? 'Todos os departamentos' : ['buyer', 'admin', 'category_manager'].includes(user.role) ? (deptTxt(user.departments) ? esc(deptTxt(user.departments)) : '<span class="c-bad">não informado</span>') + ` <button class="btn xs" data-act="admin-user-deps" data-id="${esc(user.id)}">Alterar</button>` : '—'}</td><td>${user.active ? 'Ativo' : 'Inativo'}</td><td><button class="btn xs" data-act="admin-user-edit" data-id="${esc(user.id)}">Editar</button> ${user.id === Cloud.user.id ? '' : `${user.active && user.role !== 'supplier' ? `<button class="btn xs" data-act="admin-user-password" data-id="${esc(user.id)}" data-name="${esc(user.name)}">Redefinir senha</button> ` : ''}<button class="btn xs ${user.active ? 'danger ghost' : ''}" data-act="admin-user-toggle" data-id="${esc(user.id)}" data-active="${user.active ? '0' : '1'}">${user.active ? 'Desativar' : 'Ativar'}</button>`}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">Nenhuma conta cadastrada.</p>';
   },
   paint() {
     const target = document.getElementById('adminUsers');
@@ -2016,16 +2105,56 @@ ACTIONS['admin-user-deps'] = d => {
   const u = ((AdminUsers.data || {}).users || []).find(x => x.id === d.id); if (!u) return;
   openModal({
     title: 'Departamentos de ' + u.name,
-    body: deptChecks(u.departments),
+    body: deptChecks(u.departments, deptScope()) + (deptScope() ? '<p class="small muted">Os departamentos fora da sua gerência continuam como estão.</p>' : ''),
     footer: '<button class="btn" data-close>Cancelar</button><button class="btn primary" data-save>Salvar</button>',
     onMount(el, close) {
       el.querySelector('[data-save]').addEventListener('click', async () => {
         const departments = deptValue(el);
-        if (!departments.length) return toast('Escolha ao menos um departamento.', 'warn');
+        if (!departments.length && !deptScope()) return toast('Escolha ao menos um departamento.', 'warn');
         try {
           await Cloud.request('/api/users', { method: 'PATCH', body: { id: u.id, departments } });
           close(); toast('Departamentos atualizados.', 'ok');
           if (u.id === Cloud.user.id) { Cloud.user.departments = departments; Auth.paintUser(); }
+          await ACTIONS['admin-user-refresh']({});
+        } catch (error) { toast(error.message, 'err'); }
+      });
+    }
+  });
+};
+// nome e usuário (administrador e gerentes); perfil e departamentos junto só para o administrador
+ACTIONS['admin-user-edit'] = d => {
+  const u = ((AdminUsers.data || {}).users || []).find(x => x.id === d.id); if (!u) return;
+  const podePerfil = Cloud.user.role === 'admin' && u.role !== 'admin';
+  const perfis = [['buyer', 'Comprador'], ['purchase_manager', 'Gerente de compras'], ['category_manager', 'Gerente de categoria'], ['reception', 'Recepção']];
+  openModal({
+    title: 'Editar ' + u.name,
+    body: `<form class="grid-form" onsubmit="return false">
+      <div class="fld span2"><label>Nome</label><input name="name" value="${esc(u.name)}"></div>
+      <div class="fld span2"><label>Usuário</label><input name="username" autocomplete="off" value="${esc(u.username)}"></div>
+      ${podePerfil ? `<div class="fld span2"><label>Perfil</label><select name="role">${optList(perfis, u.role)}</select></div>
+      <div class="fld span4 dep-fld"><label class="dep-lbl"></label>${deptChecks(u.departments)}</div>` : ''}
+      <p class="small muted span4">Se o usuário ou o perfil mudar, a pessoa precisa entrar de novo.</p></form>`,
+    footer: '<button class="btn" data-close>Cancelar</button><button class="btn primary" data-save>Salvar</button>',
+    onMount(el, close) {
+      const role = el.querySelector('[name=role]');
+      if (role) ligarPerfil(el, role);
+      el.querySelector('[data-save]').addEventListener('click', async () => {
+        const body = { action: 'edit', id: u.id, name: el.querySelector('[name=name]').value.trim(), username: el.querySelector('[name=username]').value.trim() };
+        if (role) {
+          body.role = role.value;
+          if (['buyer', 'category_manager'].includes(role.value)) {
+            body.departments = deptValue(el);
+            if (!body.departments.length) return toast(role.value === 'category_manager' ? 'Escolha ao menos um departamento da gerência.' : 'Escolha ao menos um departamento do comprador.', 'warn');
+          }
+        }
+        try {
+          const { user } = await Cloud.request('/api/users', { method: 'PATCH', body });
+          close(); toast('Conta atualizada.', 'ok');
+          if (u.id === Cloud.user.id) {
+            Cloud.user.name = user.name; Cloud.user.username = user.username;
+            await DB.setCfg('auth', Object.assign({}, Auth.cfg(), { nome: user.name, usuario: user.username }), true);
+            Auth.paintUser();
+          }
           await ACTIONS['admin-user-refresh']({});
         } catch (error) { toast(error.message, 'err'); }
       });
@@ -2420,8 +2549,8 @@ const Auth = {
     // abaixo do logo na barra lateral: nome de quem está logado
     const sub = document.querySelector('.brand-sub');
     if (sub) {
-      const deps = deptTxt(Cloud.user && Cloud.user.departments);
-      sub.innerHTML = a ? esc(a.nome || a.usuario) + (deps ? `<small class="brand-dep">${esc(deps)}</small>` : '') : 'Agenda e Planejamento';
+      const cargo = CARGOS[Cloud.user && Cloud.user.role] || '';
+      sub.innerHTML = a ? esc(a.nome || a.usuario) + (cargo ? `<small class="brand-dep">${esc(cargo)}</small>` : '') : 'Agenda e Planejamento';
     }
     el.hidden = !a;
     const lb = document.getElementById('lockBtn'); if (lb) lb.hidden = !a;

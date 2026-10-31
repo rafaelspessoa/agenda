@@ -14,8 +14,15 @@ export default async function handler(req, res) {
       const manager = user.role === 'purchase_manager' || user.role === 'category_manager';
       const allBuyers = user.role !== 'category_manager';
       const scope = (Array.isArray(user.departments) ? user.departments : []).map(Number).filter(Number.isFinite);
-      const fromDate = shiftDate(localDate(), manager ? -30 : -1);
-      const toDate = shiftDate(localDate(), 120);
+      // relatório do gerente: período escolhido na tela (até ~13 meses por consulta)
+      const query = new URL(req.url, 'http://local').searchParams;
+      const de = query.get('de'), ate = query.get('ate');
+      const report = manager && !!de && !!ate;
+      if (report && (!/^\d{4}-\d\d-\d\d$/.test(de) || !/^\d{4}-\d\d-\d\d$/.test(ate) || ate < de || ate > shiftDate(de, 400))) {
+        return respond(res, 400, { error: 'Periodo invalido (maximo de 400 dias).' });
+      }
+      const fromDate = report ? de : shiftDate(localDate(), manager ? -30 : -1);
+      const toDate = report ? ate : shiftDate(localDate(), 120);
       const rows = await sql`SELECT r.owner_id AS "buyerId", u.display_name AS "buyerName", u.departments AS "buyerDepartments", r.record_id AS id,
         jsonb_strip_nulls(jsonb_build_object(
           'id', r.record_id, 'data', r.payload->'data', 'hora', r.payload->'hora', 'horaFim', r.payload->'horaFim',
@@ -23,6 +30,7 @@ export default async function handler(req, res) {
           'status', r.payload->'status', 'chegouEm', r.payload->'chegouEm', 'iniciouEm', r.payload->'iniciouEm',
           'finalizouEm', r.payload->'finalizouEm', 'avisoEm', r.payload->'avisoEm', 'avisoVistoEm', r.payload->'avisoVistoEm',
           'agendadoPor', r.payload->'agendadoPor', 'atend', r.payload->'atend', 'industrias', r.payload->'industrias',
+          'concluidoEm', r.payload->'concluidoEm', 'descricao', r.payload->'descricao',
           -- fornecedor do agendamento: o laboratório vinculado (quando o comprador agenda) ou quem agendou
           'labNome', l.payload->'nome'
         )) AS appointment
@@ -34,7 +42,7 @@ export default async function handler(req, res) {
           AND COALESCE(r.payload->>'status', '') <> 'Cancelado'
           AND r.payload->>'data' BETWEEN ${fromDate} AND ${toDate}
           AND (${allBuyers} OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(u.departments) dep WHERE dep::int = ANY(${scope}::int[])))
-        ORDER BY r.payload->>'data', r.payload->>'hora' LIMIT 1000`;
+        ORDER BY r.payload->>'data', r.payload->>'hora' LIMIT ${report ? 5000 : 1000}`;
       return respond(res, 200, { appointments: rows });
     }
     if (req.method !== 'PATCH') return respond(res, 405, { error: 'Metodo nao permitido.' });
