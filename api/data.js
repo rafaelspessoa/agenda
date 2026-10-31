@@ -8,7 +8,7 @@ const LOCAL_CONFIG = new Set(['auth', 'recepAuth', 'cloudOwner', 'backupDir', 'b
 
 export default async function handler(req, res) {
   try {
-    const user = await requireUser(req, res, ['admin', 'buyer']);
+    const user = await requireUser(req, res, ['admin', 'buyer', 'purchase_manager', 'category_manager']);
     if (!user) return;
     const sql = database();
     // avisa na hora as outras telas: o próprio comprador em outros aparelhos, a recepção e o fornecedor

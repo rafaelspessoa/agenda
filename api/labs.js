@@ -22,7 +22,7 @@ function toClient(row) { return Object.assign({}, row.payload, { id: row.id, meu
 
 export default async function handler(req, res) {
   try {
-    const user = await requireUser(req, res, ['admin', 'buyer']);
+    const user = await requireUser(req, res, ['admin', 'buyer', 'purchase_manager', 'category_manager']);
     if (!user) return;
     const sql = database();
     const avisar = () => notify([topics.labs()], clientId(req));

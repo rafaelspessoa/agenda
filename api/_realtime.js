@@ -23,10 +23,12 @@ export const topics = {
 // canais que cada perfil escuta
 export function realtimeConfig(user) {
   if (!user || !baseUrl() || !publicKey()) return null;
-  // recepção e gerentes acompanham os agendamentos de todos (cada um vê só o que pode na API)
-  const list = ['reception', 'purchase_manager', 'category_manager'].includes(user.role) ? [topics.reception()]
+  // recepção acompanha os agendamentos de todos; gerentes têm a própria agenda e também o painel da equipe
+  // (cada um vê só o que pode na API)
+  const list = user.role === 'reception' ? [topics.reception()]
     : user.role === 'supplier' ? [topics.supplier(user.buyer_id)]
-      : [topics.buyer(user.id), topics.labs()];
+      : ['purchase_manager', 'category_manager'].includes(user.role) ? [topics.buyer(user.id), topics.labs(), topics.reception()]
+        : [topics.buyer(user.id), topics.labs()];
   return { url: baseUrl(), key: publicKey(), topics: list };
 }
 

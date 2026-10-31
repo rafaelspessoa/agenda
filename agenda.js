@@ -827,7 +827,8 @@ const App = {
     const groups = adminMode ? NAV.concat([{ grupo: 'Administração', itens: [['usuarios', 'Contas de acesso']] }]) : NAV;
     const nav = groups.map(g => `<div class="nav-group"><div class="nav-title">${g.grupo}</div>${g.itens.map(([k, t]) =>
       `<a href="#${k}" class="nav-item" data-view="${k}">${icon(k === 'usuarios' ? 'fornecedores' : k)}<span>${t}</span><b class="nav-count" id="nc-${k}"></b></a>`).join('')}</div>`).join('');
-    document.getElementById('nav').innerHTML = nav;
+    const gerencia = Cloud.isManager() ? `<div class="nav-group"><div class="nav-title">Gerência</div><a class="nav-item" data-act="painel-gerencia">${icon('fornecedores')}<span>Painel da gerência</span></a></div>` : '';
+    document.getElementById('nav').innerHTML = nav + gerencia;
     if (this.view === 'usuarios' && !adminMode) this.go('hoje');
   },
 
@@ -1302,6 +1303,7 @@ const ACTIONS = {
   'share-agora': async () => { await Share.tick(true); toast(Share.ok() ? 'Agendamentos enviados para a recepção.' : 'Pasta compartilhada não conectada.', Share.ok() ? 'ok' : 'warn'); App.render(); },
   'aviso-teste': () => { Aviso.pedirPermissao(); Aviso.som(); toast('Este é o som do aviso de chegada.', 'info'); },
   'toggle-nav': () => document.body.classList.toggle('nav-open'),
+  'painel-gerencia': () => { document.body.classList.remove('nav-open'); if (Cloud.isManager()) Recep.abrir(); },
   'go': d => App.go(d.view, d.q ? { q: d.q } : null),
   'sort': d => { const st = App.s(d.view || App.view); if (st.sort === d.k) st.dir = st.dir === 'desc' ? 'asc' : 'desc'; else { st.sort = d.k; st.dir = 'asc'; } App.render(); },
   'new-demanda': d => formDemanda(null, Object.assign({}, d.data ? { data: d.data } : {}, d.lab ? { labId: d.lab } : {}, d.tipo ? { tipo: d.tipo } : {}, d.hora ? { hora: d.hora } : {})),
@@ -2876,10 +2878,10 @@ const Recep = {
   async sair() {
     clearInterval(this.timer);
     const p = document.getElementById('recepPortal'); if (p) p.remove();
-    const gerente = Cloud.isManager();
-    Auth.role = gerente ? 'comp' : 'recep';
+    if (Cloud.isManager()) { document.body.classList.remove('locked'); App.render(); Aviso.check(); return; }
+    Auth.role = 'recep';
     await Cloud.logout();
-    Auth.show(gerente ? 'login' : 'recep');
+    Auth.show('recep');
   },
   // relê o banco deste navegador (outras abas) e a pasta compartilhada (outros computadores)
   async atualizar() {
@@ -3042,7 +3044,7 @@ const Recep = {
         ${shBtn}
         <div class="rp-date">${this.ic('total')}<div><span>${dn}</span><span>${esc(fmtDateLong(t).replace(/^[^,]*,\s*/, ''))}</span></div></div>
         <b class="rp-clockb" id="rpClock">${hm}</b>
-        <button class="rp-sair" data-rp="sair" title="Sair do painel">${icon('lock')}</button></header>
+        <button class="rp-sair" data-rp="sair" title="${gerente ? 'Voltar para a minha agenda' : 'Sair do painel'}">${icon(gerente ? 'chevL' : 'lock')}</button></header>
       <div class="rp-kpis2">
         ${kpi('total', 'k-red', 'A FAZER', aFazer, 'de ' + todos.length + ' · ver todos', 'abertos')}
         ${kpi('recepcao', 'k-green', 'NA RECEPÇÃO', cont.recepcao, '', 'recepcao')}
@@ -3058,7 +3060,7 @@ const Recep = {
         : dia !== t ? `<div class="rp-outro">Mostrando <b>${esc(fmtDateLong(dia))}</b> · <a data-rp="dia" data-n="0">voltar para hoje</a> · <a data-rp="modo">ver próximos dias</a></div>` : ''}
       ${!Cloud.isPanel() && Share.dir && !Share.ok() ? `<div class="rp-outro rp-warn">${icon('alert')} A pasta compartilhada precisa de permissão de novo. <a data-rp="share">Clique aqui para reconectar</a> e ver os agendamentos dos outros compradores.</div>` : ''}
       <div class="rp-cols rp-lista">${vazio || (q && !n ? `<div class="fp-vazio">${icon('search')}<b>Nada encontrado</b><span>Confira o nome digitado.</span></div>` : grade)}</div>
-      <footer class="rp-foot"><span class="rp-info-i">i</span><span class="rp-help">${gerente ? 'Consulta dos agendamentos dos compradores da sua gerência, atualizada na hora. Chegada, início e fim são registrados pela recepção e pelo comprador.' : 'Registrar chegada avisa o comprador na tela dele (alerta com som e no sino). O comprador inicia e finaliza o atendimento — o status muda aqui sozinho.'}</span>
+      <footer class="rp-foot"><span class="rp-info-i">i</span><span class="rp-help">${gerente ? 'Agendamentos dos compradores da sua gerência (e os seus), atualizados na hora. Chegada, início e fim são registrados pela recepção e por quem atende. A seta volta para a sua agenda.' : 'Registrar chegada avisa o comprador na tela dele (alerta com som e no sino). O comprador inicia e finaliza o atendimento — o status muda aqui sozinho.'}</span>
         <span class="rp-leg"><i style="background:#f59e0b"></i>Aguardando<i style="background:#2563eb"></i>Na recepção<i style="background:#16a34a"></i>Em atendimento<i style="background:#6b7280"></i>Concluído</span>
         <div class="rp-dia"><button data-rp="dia" data-n="-1" title="Dia anterior">${icon('chevL')}</button><label>${this.ic('total')} Visualização do dia<input type="date" id="rpDia" value="${dia}"></label><button data-rp="dia" data-n="1" title="Próximo dia">${icon('chevR')}</button></div></footer>`;
   },

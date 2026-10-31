@@ -28,7 +28,7 @@ export default async function handler(req, res) {
         )) AS appointment
         FROM app_records r JOIN app_users u ON u.id = r.owner_id
         LEFT JOIN labs l ON l.id = COALESCE(NULLIF(r.payload->>'labId', ''), NULLIF(r.payload->>'fornId', ''))
-        WHERE r.store = 'demandas' AND u.role IN ('buyer', 'admin') AND u.active = TRUE
+        WHERE r.store = 'demandas' AND u.role IN ('buyer', 'admin', 'purchase_manager', 'category_manager') AND u.active = TRUE
           -- mesma regra da tela (naRecepcao): atendimentos de fornecedor e qualquer agendamento com horario
           AND (r.payload->>'atend' = 'true' OR COALESCE(r.payload->>'hora', '') <> '')
           AND COALESCE(r.payload->>'status', '') <> 'Cancelado'

@@ -65,10 +65,11 @@ const Cloud = {
   supplierCodes: new Map(),
   supplierSnapshot: null,
 
-  isBuyer(user = this.user) { return !!user && ['buyer', 'admin'].includes(user.role); },
+  // gerentes usam a agenda como compradores (agendam, atendem) e ainda têm o painel da gerência
+  isBuyer(user = this.user) { return !!user && ['buyer', 'admin', 'purchase_manager', 'category_manager'].includes(user.role); },
   // gerente de compras (todos os compradores) e gerente de categoria (compradores dos seus departamentos)
   isManager(user = this.user) { return !!user && ['purchase_manager', 'category_manager'].includes(user.role); },
-  // quem usa o painel de agendamentos: recepção (registra chegada) e gerentes (só consultam)
+  // painel lido do servidor: recepção (registra chegada) e gerentes (só consultam)
   isPanel(user = this.user) { return !!user && (user.role === 'reception' || this.isManager(user)); },
 
   async request(path, options) {
@@ -114,7 +115,7 @@ const Cloud = {
   // o que cada perfil faz ao receber um sinal do servidor
   startRealtime() {
     Realtime.start(this.realtimeCfg, () => {
-      if (this.isBuyer()) { this.flush(); this.pullBuyerData(); }
+      if (this.isBuyer()) { this.flush(); this.pullBuyerData(); if (this.isManager() && document.getElementById('recepPortal')) Recep.atualizar(); }
       else if (this.isPanel()) Recep.atualizar();
       else if (this.user?.role === 'supplier') this.loadSupplier().then(() => Forn.render()).catch(error => { this.error = error.message; });
     });
@@ -461,7 +462,7 @@ const Cloud = {
 
   // busca o estado atual do servidor conforme o perfil
   refreshNow() {
-    if (this.isBuyer()) { this.flush(); this.pullBuyerData(); this.loadLabs().catch(() => {}); }
+    if (this.isBuyer()) { this.flush(); this.pullBuyerData(); this.loadLabs().catch(() => {}); if (this.isManager() && document.getElementById('recepPortal')) Recep.atualizar(); }
     else if (this.isPanel()) Recep.atualizar();
     else if (this.user?.role === 'supplier') this.loadSupplier().then(() => Forn.render()).catch(error => { this.error = error.message; });
   },

@@ -37,7 +37,7 @@ export default async function handler(req, res) {
       const [row] = await sql`SELECT
           (SELECT json_build_object('id', id, 'nome', payload->>'nome', 'code', code_key) FROM labs WHERE id = ${current.supplier_id} AND code_key IS NOT NULL) AS lab,
           (SELECT u.id FROM app_users u JOIN lab_buyers lb ON lb.buyer_id = u.id AND lb.lab_id = ${current.supplier_id}
-            WHERE u.id = ${String(body.buyerId || '')} AND u.role IN ('buyer', 'admin') AND u.active = TRUE) AS buyer`;
+            WHERE u.id = ${String(body.buyerId || '')} AND u.role IN ('buyer', 'admin', 'purchase_manager', 'category_manager') AND u.active = TRUE) AS buyer`;
       if (!row.lab) return respond(res, 403, { error: 'Acesso do laboratorio revogado.' });
       if (!row.buyer) return respond(res, 404, { error: 'Comprador nao encontrado.' });
       const target = await supplierAccess(sql, row.lab, row.buyer, row.lab.code);
@@ -64,7 +64,7 @@ export default async function handler(req, res) {
           -- só os compradores que têm este laboratório em "meus laboratórios"
           COALESCE((SELECT json_agg(json_build_object('buyerId', u.id, 'buyerName', u.display_name, 'departments', u.departments) ORDER BY u.display_name)
             FROM labs l JOIN lab_buyers lb ON lb.lab_id = l.id JOIN app_users u ON u.id = lb.buyer_id
-            WHERE l.code_key = ${code} AND u.role IN ('buyer', 'admin') AND u.active = TRUE), '[]'::json) AS buyers`;
+            WHERE l.code_key = ${code} AND u.role IN ('buyer', 'admin', 'purchase_manager', 'category_manager') AND u.active = TRUE), '[]'::json) AS buyers`;
       const retry = retryIn(row);
       if (retry) return respond(res, 429, { error: `Muitas tentativas. Tente novamente em ${retry} segundos.` });
       const buyers = row.buyers || [];

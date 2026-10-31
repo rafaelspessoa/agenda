@@ -64,7 +64,7 @@ export default async function handler(req, res) {
     if (req.method === 'GET') {
       // compradores vinculados ao laboratório (para trocar dentro da área)
       const buyers = await sql`SELECT u.id AS "buyerId", u.display_name AS "buyerName", u.departments FROM lab_buyers lb JOIN app_users u ON u.id = lb.buyer_id
-        WHERE lb.lab_id = ${user.supplier_id} AND u.role IN ('buyer', 'admin') AND u.active = TRUE ORDER BY u.display_name`;
+        WHERE lb.lab_id = ${user.supplier_id} AND u.role IN ('buyer', 'admin', 'purchase_manager', 'category_manager') AND u.active = TRUE ORDER BY u.display_name`;
       const buyerName = (buyers.find(item => item.buyerId === user.buyer_id) || {}).buyerName || '';
       const busy = [];
       const appointments = [];
