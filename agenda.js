@@ -866,10 +866,28 @@ const App = {
       sh.hidden = !ss;
       if (ss) { sh.className = 'backup-status ' + ss.level; sh.innerHTML = icon('folder') + '<span>' + esc(ss.text) + '</span>'; sh.title = ss.title || ''; }
     }
+    this.notifBar();
     document.querySelectorAll('[data-view]').forEach(a => a.classList.toggle('active', a.dataset.view === this.view));
     const al = Engine.alertas().filter(a => a.nivel === 'crit').length;
     const ab = document.getElementById('alertBtn');
     if (ab) { ab.querySelector('b').textContent = al || ''; ab.classList.toggle('has', al > 0); }
+  },
+
+  // sem permissão do navegador o aviso de chegada não aparece no canto da tela com a agenda minimizada
+  notifBar() {
+    const perm = Cloud.isBuyer() && 'Notification' in window ? Notification.permission : 'granted';
+    let nb = document.getElementById('notifBar');
+    if (perm === 'granted') { if (nb) nb.remove(); return; }
+    if (!nb) { nb = document.createElement('div'); nb.id = 'notifBar'; document.getElementById('main').before(nb); }
+    nb.className = 'notif-bar ' + perm;
+    nb.innerHTML = perm === 'denied'
+      ? icon('bell') + '<span><b>Avisos do Windows bloqueados.</b> Para ver a chegada do fornecedor no canto da tela com a agenda minimizada: clique no cadeado ao lado do endereço do site → Notificações → Permitir, e recarregue a página.</span>'
+      : icon('bell') + '<span><b>Ative os avisos do Windows</b> para ver a chegada do fornecedor no canto da tela, por cima das outras janelas, mesmo com a agenda minimizada.</span>' + btn('Ativar avisos', 'notif-ativar', '', 'primary sm');
+    // permissão trocada nas configurações do navegador: a faixa acompanha
+    if (!this._permVigia && navigator.permissions) {
+      this._permVigia = true;
+      navigator.permissions.query({ name: 'notifications' }).then(p => { p.onchange = () => this.notifBar(); }).catch(() => {});
+    }
   },
 
   renderSoon: debounce(function () { App.render(); }, 30),
@@ -1305,7 +1323,19 @@ const ACTIONS = {
   'share-escolher': () => Share.escolher(),
   'share-sair': async () => { if (await confirmBox('Desconectar a pasta compartilhada? A recepção deixa de receber seus agendamentos deste computador.', 'Desconectar', true)) Share.desconectar(); },
   'share-agora': async () => { await Share.tick(true); toast(Share.ok() ? 'Agendamentos enviados para a recepção.' : 'Pasta compartilhada não conectada.', Share.ok() ? 'ok' : 'warn'); App.render(); },
-  'aviso-teste': () => { Aviso.pedirPermissao(); Aviso.som(); toast('Este é o som do aviso de chegada.', 'info'); },
+  'aviso-teste': async () => {
+    await Aviso.pedirPermissao(); Aviso.som();
+    if (!('Notification' in window) || Notification.permission !== 'granted') return toast('Este é o som do aviso. Os avisos do Windows estão desativados neste navegador (veja a faixa no topo).', 'warn', 8000);
+    toast('Minimize a agenda agora: em 5 segundos o aviso aparece no canto da tela.', 'info', 5000);
+    setTimeout(() => { Aviso.som(); Aviso.popup('Teste: chegou na recepção', 'Fornecedor de teste · é assim que o aviso aparece com a agenda minimizada.', 'agenda-teste-' + Date.now()); }, 5000);
+  },
+  'notif-ativar': async () => {
+    await Aviso.pedirPermissao();
+    const p = 'Notification' in window ? Notification.permission : 'denied';
+    if (p === 'granted') { Aviso.popup('Avisos ativados', 'Quando a recepção registrar uma chegada, o aviso aparece aqui no canto da tela.', 'agenda-ativado'); toast('Avisos do Windows ativados.', 'ok'); }
+    else toast(p === 'denied' ? 'O navegador bloqueou os avisos. Libere no cadeado ao lado do endereço do site.' : 'Clique em Permitir na pergunta do navegador.', 'warn', 8000);
+    App.refreshChrome();
+  },
   'toggle-nav': () => document.body.classList.toggle('nav-open'),
   'painel-gerencia': () => { document.body.classList.remove('nav-open'); if (Cloud.isManager()) Recep.abrir(); },
   'go': d => App.go(d.view, d.q ? { q: d.q } : null),
@@ -3455,12 +3485,13 @@ const Aviso = {
   },
   check() {
     if (typeof App === 'undefined' || !App.started) return;
-    if (document.getElementById('recepPortal') || document.getElementById('fornPortal')) return;
     const l = this.pendentes();
     const novos = l.filter(d => !this.vistos.has(d.id + '|' + d.avisoEm));
     novos.forEach(d => this.vistos.add(d.id + '|' + d.avisoEm));
+    // som e aviso do Windows mesmo com o painel da gerência aberto; a janela de alerta fica para a agenda
     if (novos.length) { this.som(); this.notificar(novos); }
     this.piscar(l.length);
+    if (document.getElementById('recepPortal') || document.getElementById('fornPortal')) return;
     this.modal(l);
   },
   modal(l) {
@@ -3502,17 +3533,28 @@ const Aviso = {
       });
     } catch (e) { }
   },
+  // aviso do Windows (canto da tela, por cima de tudo): aparece com a agenda minimizada, atrás de outra janela ou em outra aba
   notificar(l) {
-    try {
-      if (!('Notification' in window) || Notification.permission !== 'granted') return;
-      const d = l[0];
-      const n = new Notification(l.length === 1 ? 'Chegou na recepção: ' + (d.fornNome || d.titulo || 'Fornecedor') : l.length + ' visitantes chegaram na recepção', {
-        body: l.map(x => (x.fornNome || x.titulo || 'Fornecedor') + ' · agendado às ' + (x.hora || '')).join('\n') + '\nA recepção está avisando você.', tag: 'agenda-recepcao', requireInteraction: true
-      });
-      n.onclick = () => { try { window.focus(); } catch (e) { } n.close(); };
-    } catch (e) { }
+    if (!document.hidden && document.hasFocus()) return; // agenda na frente: a janela de alerta já aparece
+    const d = l[0];
+    this.popup(l.length === 1 ? 'Chegou na recepção: ' + (d.fornNome || d.titulo || 'Fornecedor') : l.length + ' visitantes chegaram na recepção',
+      l.map(x => (x.fornNome || x.titulo || 'Fornecedor') + ' · agendado às ' + (x.hora || '')).join('\n') + '\nA recepção está avisando você.',
+      // cada chegada/novo aviso tem a sua marca: aparece de novo em vez de substituir o anterior em silêncio
+      'agenda-recepcao-' + d.id + '-' + d.avisoEm);
   },
-  async pedirPermissao() { try { if ('Notification' in window && Notification.permission === 'default') await Notification.requestPermission(); } catch (e) { } },
+  popup(titulo, corpo, tag) {
+    try {
+      if (!('Notification' in window) || Notification.permission !== 'granted') return false;
+      const ic = document.getElementById('appIcon');
+      const n = new Notification(titulo, { body: corpo, tag, renotify: true, requireInteraction: true, icon: ic ? ic.src : undefined });
+      n.onclick = () => { try { window.focus(); } catch (e) { } n.close(); };
+      return true;
+    } catch (e) { return false; }
+  },
+  async pedirPermissao() {
+    try { if ('Notification' in window && Notification.permission === 'default') await Notification.requestPermission(); } catch (e) { }
+    if (typeof App !== 'undefined' && App.started) App.refreshChrome();
+  },
   piscar(n) {
     if (n && !this.flash) {
       let on = false;
@@ -3674,7 +3716,7 @@ function shareCardHTML() {
       ${Share.ok() ? btn(icon('upload') + ' Enviar agora para a recepção', 'share-agora', '', 'primary') + btn('Trocar pasta', 'share-escolher') + btn('Desconectar', 'share-sair', '', 'danger ghost')
         : Share.dir ? btn(icon('folder') + ' Reconectar pasta “' + esc(Share.nomePasta()) + '”', 'share-conectar', '', 'primary') + btn('Escolher outra pasta', 'share-escolher')
         : btn(icon('folder') + ' Escolher pasta compartilhada', 'share-escolher', '', 'primary')}
-      ${btn(icon('bell') + ' Testar som do aviso', 'aviso-teste')}
+      ${btn(icon('bell') + ' Testar aviso de chegada', 'aviso-teste')}
     </div>
     <p class="small muted">${Share.ok() ? `Pasta: <b>${esc(Share.nomePasta())}</b> · arquivo deste comprador: <code>agenda_${esc(Share.slug(a ? a.usuario : ''))}.json</code>${Share.pubOk ? ' · último envio às ' + Recep.hora(Share.pubOk) : ''}. ` : ''}Aviso do Windows: ${notif}.</p>`}
   </div>`;
