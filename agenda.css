@@ -786,3 +786,12 @@ input.br-date{font-variant-numeric:tabular-nums}
 .notif-bar .ic{flex:none;color:var(--wait)}.notif-bar span{flex:1}.notif-bar .btn{flex:none}
 .notif-bar.denied{background:var(--late-soft)}.notif-bar.denied .ic{color:var(--late)}
 @media (max-width:760px){.notif-bar{padding:10px 16px;flex-wrap:wrap}}
+
+/* botão "Avisos na tela" e janela de configuração */
+.aviso-cfg-btn{display:inline-flex;align-items:center;gap:6px;background:var(--gold-soft);border-color:var(--gold);color:var(--text);white-space:nowrap}
+.aviso-cfg-btn.on{background:var(--ok-soft);border-color:var(--ok);color:var(--ok)}
+.aviso-cfg-btn .ic{width:16px;height:16px}
+@media (max-width:760px){.aviso-cfg-btn span{display:none}}
+.av-cfg{display:flex;flex-direction:column;gap:12px}.av-step{border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px;background:var(--surface2)}
+.av-step h4{margin:0 0 6px}.av-ok{display:inline-flex;align-items:center;gap:4px;color:var(--ok);font-weight:700}.av-ok .ic{width:14px;height:14px}
+.av-passos{margin:6px 0 10px;padding-left:20px;font-size:13px;line-height:1.5}

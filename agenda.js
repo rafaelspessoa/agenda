@@ -844,6 +844,13 @@ const App = {
     si.addEventListener('input', debounce(() => this.quickSearch(si.value), 150));
     si.addEventListener('keydown', e => { if (e.key === 'Enter' && si.value.trim()) { this.go('busca', { q: si.value.trim() }); this.hideQuick(); } if (e.key === 'Escape') this.hideQuick(); });
     si.addEventListener('blur', () => setTimeout(() => this.hideQuick(), 200));
+    const ab = document.getElementById('alertBtn');
+    if (ab && !document.getElementById('avisoCfgBtn')) {
+      const b = document.createElement('button');
+      b.id = 'avisoCfgBtn'; b.className = 'btn sm aviso-cfg-btn'; b.dataset.act = 'avisos-config';
+      b.title = 'Autorizar o aviso de chegada por cima das outras janelas';
+      ab.before(b);
+    }
     this.refreshChrome();
   },
 
@@ -867,6 +874,13 @@ const App = {
       if (ss) { sh.className = 'backup-status ' + ss.level; sh.innerHTML = icon('folder') + '<span>' + esc(ss.text) + '</span>'; sh.title = ss.title || ''; }
     }
     this.notifBar();
+    const cfg = document.getElementById('avisoCfgBtn');
+    if (cfg) {
+      const on = Sobrepor.aberta() || ('Notification' in window && Notification.permission === 'granted');
+      cfg.hidden = !Cloud.isBuyer();
+      cfg.classList.toggle('on', on);
+      cfg.innerHTML = icon('bell') + '<span>' + (Sobrepor.aberta() ? 'Aviso na tela: ligado' : on ? 'Avisos na tela' : 'Ativar avisos na tela') + '</span>';
+    }
     document.querySelectorAll('[data-view]').forEach(a => a.classList.toggle('active', a.dataset.view === this.view));
     const al = Engine.alertas().filter(a => a.nivel === 'crit').length;
     const ab = document.getElementById('alertBtn');
@@ -881,8 +895,8 @@ const App = {
     if (!nb) { nb = document.createElement('div'); nb.id = 'notifBar'; document.getElementById('main').before(nb); }
     nb.className = 'notif-bar ' + perm;
     nb.innerHTML = perm === 'denied'
-      ? icon('bell') + '<span><b>Avisos do Windows bloqueados.</b> Para ver a chegada do fornecedor no canto da tela com a agenda minimizada: clique no cadeado ao lado do endereço do site → Notificações → Permitir, e recarregue a página.</span>'
-      : icon('bell') + '<span><b>Ative os avisos do Windows</b> para ver a chegada do fornecedor no canto da tela, por cima das outras janelas, mesmo com a agenda minimizada.</span>' + btn('Ativar avisos', 'notif-ativar', '', 'primary sm');
+      ? icon('bell') + '<span><b>Avisos do Windows bloqueados neste navegador.</b> Libere no cadeado ao lado do endereço do site, ou use a janela de aviso sempre visível.</span>' + btn('Ver como ativar', 'avisos-config', '', 'primary sm')
+      : icon('bell') + '<span><b>Ative os avisos do Windows</b> para ver a chegada do fornecedor no canto da tela, por cima das outras janelas, mesmo com a agenda minimizada.</span>' + btn('Ativar avisos', 'avisos-config', '', 'primary sm');
     // permissão trocada nas configurações do navegador: a faixa acompanha
     if (!this._permVigia && navigator.permissions) {
       this._permVigia = true;
@@ -1328,13 +1342,6 @@ const ACTIONS = {
     if (!('Notification' in window) || Notification.permission !== 'granted') return toast('Este é o som do aviso. Os avisos do Windows estão desativados neste navegador (veja a faixa no topo).', 'warn', 8000);
     toast('Minimize a agenda agora: em 5 segundos o aviso aparece no canto da tela.', 'info', 5000);
     setTimeout(() => { Aviso.som(); Aviso.popup('Teste: chegou na recepção', 'Fornecedor de teste · é assim que o aviso aparece com a agenda minimizada.', 'agenda-teste-' + Date.now()); }, 5000);
-  },
-  'notif-ativar': async () => {
-    await Aviso.pedirPermissao();
-    const p = 'Notification' in window ? Notification.permission : 'denied';
-    if (p === 'granted') { Aviso.popup('Avisos ativados', 'Quando a recepção registrar uma chegada, o aviso aparece aqui no canto da tela.', 'agenda-ativado'); toast('Avisos do Windows ativados.', 'ok'); }
-    else toast(p === 'denied' ? 'O navegador bloqueou os avisos. Libere no cadeado ao lado do endereço do site.' : 'Clique em Permitir na pergunta do navegador.', 'warn', 8000);
-    App.refreshChrome();
   },
   'toggle-nav': () => document.body.classList.toggle('nav-open'),
   'painel-gerencia': () => { document.body.classList.remove('nav-open'); if (Cloud.isManager()) Recep.abrir(); },
@@ -3491,6 +3498,7 @@ const Aviso = {
     // som e aviso do Windows mesmo com o painel da gerência aberto; a janela de alerta fica para a agenda
     if (novos.length) { this.som(); this.notificar(novos); }
     this.piscar(l.length);
+    Sobrepor.render(l, novos.length > 0);
     if (document.getElementById('recepPortal') || document.getElementById('fornPortal')) return;
     this.modal(l);
   },
@@ -3512,9 +3520,11 @@ const Aviso = {
     const b = e.target.closest('[data-av]'); if (!b) return;
     if (b.dataset.av === 'notif') { await this.pedirPermissao(); return this.modal(this.pendentes()); }
     if (b.dataset.av === 'iniciar') { b.disabled = true; await Atend.iniciar(b.dataset.id); return this.check(); }
-    const ids = b.dataset.av === 'todos' ? this.pendentes().map(d => d.id) : [b.dataset.id];
-    const agora = new Date().toISOString();
     b.disabled = true;
+    return this.ciente(b.dataset.av === 'todos' ? this.pendentes().map(d => d.id) : [b.dataset.id]);
+  },
+  async ciente(ids) {
+    const agora = new Date().toISOString();
     for (const id of ids) { const d = DB.get('demandas', id); if (d) await Engine.salvarDemanda(Object.assign({}, d, { avisoVistoEm: agora }), d); }
     toast('A recepção vai ver que você está ciente.', 'ok');
     if (Share.ok()) Share.publicar(true).catch(err => Share.falha(err));
@@ -3562,6 +3572,109 @@ const Aviso = {
     } else if (!n && this.flash) { clearInterval(this.flash); this.flash = null; if (this.tituloBase) document.title = this.tituloBase; }
   }
 };
+
+/* ---------- avisos por cima das outras janelas ----------
+   1) notificação do Windows (precisa da permissão do navegador e do Windows);
+   2) janela de aviso sempre visível (Picture-in-Picture do Chrome/Edge): fica no canto, por cima de qualquer programa,
+      mesmo com o navegador minimizado — não depende das configurações de notificação do Windows. */
+const Sobrepor = {
+  win: null,
+  suportado() { return 'documentPictureInPicture' in window; },
+  aberta() { return !!(this.win && !this.win.closed); },
+  async abrir() {
+    if (this.aberta()) return true;
+    if (!this.suportado()) return false;
+    const w = await window.documentPictureInPicture.requestWindow({ width: 380, height: 230 });
+    this.win = w;
+    w.document.title = 'Avisos da agenda';
+    const st = w.document.createElement('style');
+    st.textContent = `body{margin:0;font:13px 'Segoe UI',system-ui,sans-serif;background:#1f1819;color:#f3ebea}
+      .pp{padding:12px 14px}.pp-h{display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px}.pp-h svg{width:18px;height:18px}
+      .pp-s{color:#a8999a;margin-top:6px;line-height:1.4}.pp.alerta{background:#c8102e;min-height:100vh;box-sizing:border-box;animation:pisca 1s 6}
+      @keyframes pisca{50%{background:#7f0a1d}}
+      .pp-i{background:rgba(0,0,0,.22);border-radius:8px;padding:8px 10px;margin-top:8px}.pp-i b{display:block;font-size:14px}.pp-i span{color:#fde2e6}
+      .pp-b{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}button{font:inherit;font-weight:600;border:0;border-radius:6px;padding:6px 10px;cursor:pointer}
+      .b1{background:#fff;color:#a50c25}.b2{background:rgba(255,255,255,.18);color:#fff}`;
+    w.document.head.append(st);
+    w.addEventListener('pagehide', () => { this.win = null; App.refreshChrome(); });
+    w.document.body.addEventListener('click', async e => {
+      const b = e.target.closest('[data-pp]'); if (!b) return;
+      if (b.dataset.pp === 'abrir') { try { window.focus(); } catch (err) { } }
+      if (b.dataset.pp === 'ciente') { b.disabled = true; await Aviso.ciente(Aviso.pendentes().map(d => d.id)); }
+    });
+    this.render(Aviso.pendentes(), false);
+    App.refreshChrome();
+    return true;
+  },
+  fechar() { if (this.aberta()) this.win.close(); this.win = null; App.refreshChrome(); },
+  render(l, novo) {
+    if (!this.aberta()) return;
+    const body = this.win.document.body;
+    if (!l.length) {
+      body.innerHTML = `<div class="pp"><div class="pp-h">${icon('bell')} Avisos da agenda ligados</div>
+        <div class="pp-s">Deixe esta janelinha aberta. Quando a recepção registrar a chegada de um fornecedor, ela fica vermelha e toca o som — mesmo com a agenda minimizada.</div></div>`;
+      return;
+    }
+    const t = today();
+    body.innerHTML = `<div class="pp alerta"><div class="pp-h">${icon('bell')} ${l.length === 1 ? 'Chegou na recepção!' : l.length + ' chegaram na recepção!'}</div>
+      ${l.map(d => `<div class="pp-i"><b>${esc(d.fornNome || d.titulo || 'Fornecedor')}</b><span>Agendado ${d.data !== t ? fmtDateShort(d.data) + ' ' : ''}às ${esc(d.hora || '')} · chegou às ${Recep.hora(d.chegouEm || d.avisoEm)}</span></div>`).join('')}
+      <div class="pp-b"><button class="b1" data-pp="abrir">Abrir a agenda</button><button class="b2" data-pp="ciente">Ciente, já vou</button></div></div>`;
+    if (novo) { try { this.win.focus(); } catch (e) { } }
+  }
+};
+const AvisosCfg = {
+  abrir() {
+    openModal({
+      title: 'Avisos de chegada na tela',
+      wide: true,
+      body: '<div id="avCfg"></div>',
+      footer: '<button class="btn" data-close>Fechar</button>',
+      onMount: el => { this.el = el; this.etapa = ''; this.pintar(); el.addEventListener('click', e => this.onClick(e)); }
+    });
+  },
+  pintar() {
+    const box = this.el && this.el.querySelector('#avCfg'); if (!box) return;
+    const temN = 'Notification' in window, perm = temN ? Notification.permission : 'denied';
+    const ok = '<span class="av-ok">' + icon('check') + ' ligado</span>';
+    const passosWin = `<ol class="av-passos">
+        <li><a href="ms-settings:notifications">Abra as configurações de notificação do Windows</a> (ou Iniciar → Configurações → Sistema → Notificações).</li>
+        <li>Deixe <b>Notificações</b> ligado e <b>Não incomodar</b> desligado.</li>
+        <li>Na lista de aplicativos, ligue o <b>Microsoft Edge</b> (ou <b>Google Chrome</b>) e marque <b>Mostrar faixas de notificação</b>.</li>
+        <li>Volte aqui e clique em <b>Testar de novo</b>.</li></ol>`;
+    const passo1 = !temN ? '<p class="small muted">Este navegador não tem notificações. Use a janela de aviso sempre visível (passo 2).</p>'
+      : perm === 'denied' ? `<p class="small"><b class="c-bad">Bloqueado neste navegador.</b> Clique no <b>cadeado</b> (ou no ícone de controles) à esquerda do endereço do site → <b>Notificações</b> → <b>Permitir</b>, e recarregue a página (F5).</p>`
+      : this.etapa === 'pergunta' ? `<p class="small">Enviamos um aviso de teste. <b>Ele apareceu no canto da tela?</b></p><div class="page-actions">${btn('Sim, apareceu', 'avc-sim', '', 'primary')}${btn('Não apareceu', 'avc-nao')}</div>`
+      : this.etapa === 'nao' ? `<p class="small">O navegador já tem permissão, então quem está segurando o aviso é o <b>Windows</b>:</p>${passosWin}<div class="page-actions">${btn('Testar de novo', 'avc-testar', '', 'primary')}</div>`
+      : perm === 'granted' ? `<p class="small">${ok} Quando a recepção registrar uma chegada com a agenda minimizada, o aviso aparece no canto da tela.</p><div class="page-actions">${btn('Testar agora', 'avc-testar')}</div>`
+      : `<p class="small">Clique no botão e depois em <b>Permitir</b> na pergunta do navegador (aparece perto da barra de endereço).</p><div class="page-actions">${btn(icon('bell') + ' Autorizar avisos do Windows', 'avc-testar', '', 'primary')}</div>`;
+    const passo2 = !Sobrepor.suportado() ? '<p class="small muted">Disponível no Microsoft Edge e no Google Chrome atualizados. Atualize o navegador para usar.</p>'
+      : Sobrepor.aberta() ? `<p class="small">${ok} A janelinha está aberta no canto da tela. Deixe-a aberta: ela fica por cima de tudo e fica vermelha com som quando o fornecedor chega.</p><div class="page-actions">${btn('Fechar a janela de aviso', 'avc-pip-fechar')}</div>`
+      : `<p class="small">Abre uma janelinha que fica <b>sempre por cima</b> de qualquer programa, mesmo com o navegador minimizado. Funciona mesmo se o Windows bloquear as notificações. Precisa abrir de novo a cada vez que a agenda for aberta ou recarregada.</p><div class="page-actions">${btn(icon('bell') + ' Abrir janela de aviso sempre visível', 'avc-pip', '', 'primary')}</div>`;
+    box.innerHTML = `<div class="av-cfg"><div class="av-step"><h4>1. Aviso do Windows no canto da tela</h4>${passo1}</div>
+      <div class="av-step"><h4>2. Janela de aviso sempre visível (sobreposição)</h4>${passo2}</div>
+      <p class="small muted">Cada pessoa faz isso uma vez no seu computador. Para testar o som: botão “Testar aviso de chegada” em Atendimentos.</p></div>`;
+  },
+  async onClick(e) {
+    const b = e.target.closest('[data-act^="avc-"]'); if (!b) return;
+    e.stopPropagation();
+    const k = b.dataset.act;
+    if (k === 'avc-testar') {
+      if ('Notification' in window && Notification.permission === 'default') { try { await Notification.requestPermission(); } catch (err) { } }
+      if ('Notification' in window && Notification.permission === 'granted') {
+        Aviso.som();
+        Aviso.popup('Teste: aviso da agenda', 'Se você está vendo isto no canto da tela, o aviso de chegada está funcionando.', 'agenda-teste-' + Date.now());
+        this.etapa = 'pergunta';
+      }
+    }
+    if (k === 'avc-sim') { this.etapa = ''; toast('Avisos do Windows funcionando.', 'ok'); }
+    if (k === 'avc-nao') this.etapa = 'nao';
+    if (k === 'avc-pip') { try { if (!(await Sobrepor.abrir())) toast('Seu navegador não abre a janela de aviso. Atualize o Edge ou o Chrome.', 'warn', 7000); } catch (err) { toast('Não foi possível abrir a janela de aviso: ' + err.message, 'err', 7000); } }
+    if (k === 'avc-pip-fechar') Sobrepor.fechar();
+    App.refreshChrome();
+    this.pintar();
+  }
+};
+ACTIONS['avisos-config'] = () => AvisosCfg.abrir();
 
 /* ---------- tela do comprador: Área do fornecedor ---------- */
 VIEWS.fornecedores = {
