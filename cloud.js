@@ -66,6 +66,10 @@ const Cloud = {
   supplierSnapshot: null,
 
   isBuyer(user = this.user) { return !!user && ['buyer', 'admin'].includes(user.role); },
+  // gerente de compras (todos os compradores) e gerente de categoria (compradores dos seus departamentos)
+  isManager(user = this.user) { return !!user && ['purchase_manager', 'category_manager'].includes(user.role); },
+  // quem usa o painel de agendamentos: recepção (registra chegada) e gerentes (só consultam)
+  isPanel(user = this.user) { return !!user && (user.role === 'reception' || this.isManager(user)); },
 
   async request(path, options) {
     const opts = Object.assign({ credentials: 'same-origin', headers: {} }, options || {});
@@ -111,7 +115,7 @@ const Cloud = {
   startRealtime() {
     Realtime.start(this.realtimeCfg, () => {
       if (this.isBuyer()) { this.flush(); this.pullBuyerData(); }
-      else if (this.user?.role === 'reception') Recep.atualizar();
+      else if (this.isPanel()) Recep.atualizar();
       else if (this.user?.role === 'supplier') this.loadSupplier().then(() => Forn.render()).catch(error => { this.error = error.message; });
     });
   },
@@ -194,7 +198,7 @@ const Cloud = {
       return;
     }
 
-    if (user.role === 'reception') {
+    if (this.isPanel(user)) {
       document.body.classList.add('locked');
       this.releaseGate(true);
       Recep.abrir();
@@ -458,7 +462,7 @@ const Cloud = {
   // busca o estado atual do servidor conforme o perfil
   refreshNow() {
     if (this.isBuyer()) { this.flush(); this.pullBuyerData(); this.loadLabs().catch(() => {}); }
-    else if (this.user?.role === 'reception') Recep.atualizar();
+    else if (this.isPanel()) Recep.atualizar();
     else if (this.user?.role === 'supplier') this.loadSupplier().then(() => Forn.render()).catch(error => { this.error = error.message; });
   },
 

@@ -14,3 +14,5 @@ export function cleanDepartments(value) {
   const codes = [...new Set(value.map(Number))].sort((a, b) => a - b);
   return codes.every(code => DEPARTMENTS[code]) ? codes : null;
 }
+
+export const ALL_DEPARTMENTS = Object.keys(DEPARTMENTS).map(Number);

@@ -6,11 +6,15 @@ const ATTENDANCE_FIELDS = new Set(['chegouEm', 'iniciouEm', 'finalizouEm', 'avis
 
 export default async function handler(req, res) {
   try {
-    const user = await requireUser(req, res, ['reception']);
+    const user = await requireUser(req, res, ['reception', 'purchase_manager', 'category_manager']);
     if (!user) return;
     const sql = database();
     if (req.method === 'GET') {
-      const fromDate = shiftDate(localDate(), -1);
+      // gerente de categoria: só compradores com algum departamento da sua gerência; gerente de compras: todos
+      const manager = user.role === 'purchase_manager' || user.role === 'category_manager';
+      const allBuyers = user.role !== 'category_manager';
+      const scope = (Array.isArray(user.departments) ? user.departments : []).map(Number).filter(Number.isFinite);
+      const fromDate = shiftDate(localDate(), manager ? -30 : -1);
       const toDate = shiftDate(localDate(), 120);
       const rows = await sql`SELECT r.owner_id AS "buyerId", u.display_name AS "buyerName", u.departments AS "buyerDepartments", r.record_id AS id,
         jsonb_strip_nulls(jsonb_build_object(
@@ -29,10 +33,13 @@ export default async function handler(req, res) {
           AND (r.payload->>'atend' = 'true' OR COALESCE(r.payload->>'hora', '') <> '')
           AND COALESCE(r.payload->>'status', '') <> 'Cancelado'
           AND r.payload->>'data' BETWEEN ${fromDate} AND ${toDate}
+          AND (${allBuyers} OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(u.departments) dep WHERE dep::int = ANY(${scope}::int[])))
         ORDER BY r.payload->>'data', r.payload->>'hora' LIMIT 1000`;
       return respond(res, 200, { appointments: rows });
     }
     if (req.method !== 'PATCH') return respond(res, 405, { error: 'Metodo nao permitido.' });
+    // gerentes só consultam; chegada, início e fim são da recepção
+    if (user.role !== 'reception') return respond(res, 403, { error: 'Somente a recepcao registra atendimentos.' });
     if (!sameOrigin(req)) return respond(res, 403, { error: 'Origem nao permitida.' });
     const body = requestBody(req);
     const buyerId = String(body.buyerId || '');

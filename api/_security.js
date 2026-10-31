@@ -39,7 +39,8 @@ export function normalizeUsername(value) {
 }
 
 export function loginRolesForProfile(profile) {
-  if (profile === 'buyer') return ['buyer', 'admin'];
+  // aba "Comercial": compradores, administrador e gerentes
+  if (profile === 'buyer') return ['buyer', 'admin', 'purchase_manager', 'category_manager'];
   if (profile === 'reception') return ['reception'];
   return [];
 }

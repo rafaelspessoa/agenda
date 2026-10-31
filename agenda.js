@@ -1928,9 +1928,9 @@ VIEWS.usuarios = {
       `<div class="cols2"><div class="card"><h3>Novo acesso interno</h3><form class="grid-form" id="adminUserForm" onsubmit="return false">
           <div class="fld span2"><label>Nome</label><input name="name" required></div>
           <div class="fld span2"><label>Usuário</label><input name="username" autocomplete="off" required></div>
-          <div class="fld span2"><label>Perfil</label><select name="role"><option value="buyer">Comprador</option><option value="reception">Recepção</option></select></div>
+          <div class="fld span2"><label>Perfil</label><select name="role"><option value="buyer">Comprador</option><option value="purchase_manager">Gerente de compras</option><option value="category_manager">Gerente de categoria</option><option value="reception">Recepção</option></select></div>
           <div class="fld span2"><label>Senha inicial (mínimo 6 caracteres)</label><input type="password" name="password" minlength="6" autocomplete="new-password" required></div>
-          <div class="fld span4 dep-fld"><label>Departamentos do comprador (escolha um ou mais)</label>${deptChecks([])}</div>
+          <div class="fld span4 dep-fld"><label class="dep-lbl">Departamentos do comprador (escolha um ou mais)</label>${deptChecks([])}</div>
           <div class="page-actions span4">${btn(icon('plus') + ' Criar acesso', 'admin-user-add', '', 'primary')}</div>
         </form></div><div class="card"><div class="card-h"><h3>Usuários cadastrados</h3><button class="icon-btn" data-act="admin-user-refresh" title="Atualizar">${icon('refresh')}</button></div><div id="adminUsers">${AdminUsers.usersHTML()}</div></div></div>`;
   },
@@ -1938,7 +1938,19 @@ VIEWS.usuarios = {
     ACTIONS['admin-user-refresh']({});
     // departamentos só para comprador
     const f = main.querySelector('#adminUserForm'), role = f && f.querySelector('[name=role]');
-    if (role) { const upd = () => { f.querySelector('.dep-fld').style.display = role.value === 'buyer' ? '' : 'none'; }; role.addEventListener('change', upd); upd(); }
+    if (role) {
+      // comprador e gerente de categoria escolhem; gerente de compras já vem com todos (fixo); recepção não tem
+      const upd = () => {
+        const v = role.value, fld = f.querySelector('.dep-fld');
+        fld.style.display = v === 'reception' ? 'none' : '';
+        fld.querySelector('.dep-lbl').textContent = v === 'purchase_manager' ? 'Departamentos: gerente de compras acompanha todos'
+          : v === 'category_manager' ? 'Departamentos da gerência (escolha um ou mais)' : 'Departamentos do comprador (escolha um ou mais)';
+        fld.querySelectorAll('input[name=dep]').forEach(i => { if (v === 'purchase_manager') i.checked = true; i.disabled = v === 'purchase_manager'; });
+        if (fld.dataset.prev === 'purchase_manager' && v !== 'purchase_manager') fld.querySelectorAll('input[name=dep]').forEach(i => { i.checked = false; });
+        fld.dataset.prev = v;
+      };
+      role.addEventListener('change', upd); upd();
+    }
   }
 };
 // ultima lista carregada: a tela abre com ela na hora e atualiza em segundo plano
@@ -1957,8 +1969,8 @@ const AdminUsers = {
     if (this.erro && !this.data) return `<p class="c-bad small">${esc(this.erro)}</p>`;
     if (!this.data) return '<p class="muted small">Carregando contas…</p>';
     const { users } = this.data;
-    const perfil = { admin: 'Administrador', buyer: 'Comprador', reception: 'Recepção', supplier: 'Fornecedor' };
-    return users.length ? `<div class="tbl-wrap"><table class="tbl dense"><thead><tr><th>Nome</th><th>Usuário</th><th>Perfil</th><th>Departamentos</th><th>Estado</th><th></th></tr></thead><tbody>${users.map(user => `<tr><td>${esc(user.name)}</td><td>${esc(user.username)}</td><td>${esc(perfil[user.role] || user.role)}</td><td class="small">${['buyer', 'admin'].includes(user.role) ? (deptTxt(user.departments) ? esc(deptTxt(user.departments)) : '<span class="c-bad">não informado</span>') + ` <button class="btn xs" data-act="admin-user-deps" data-id="${esc(user.id)}">Alterar</button>` : '—'}</td><td>${user.active ? 'Ativo' : 'Inativo'}</td><td>${user.id === Cloud.user.id ? '' : `${user.active && user.role !== 'supplier' ? `<button class="btn xs" data-act="admin-user-password" data-id="${esc(user.id)}" data-name="${esc(user.name)}">Redefinir senha</button> ` : ''}<button class="btn xs ${user.active ? 'danger ghost' : ''}" data-act="admin-user-toggle" data-id="${esc(user.id)}" data-active="${user.active ? '0' : '1'}">${user.active ? 'Desativar' : 'Ativar'}</button>`}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">Nenhuma conta cadastrada.</p>';
+    const perfil = { admin: 'Administrador', buyer: 'Comprador', reception: 'Recepção', supplier: 'Fornecedor', purchase_manager: 'Gerente de compras', category_manager: 'Gerente de categoria' };
+    return users.length ? `<div class="tbl-wrap"><table class="tbl dense"><thead><tr><th>Nome</th><th>Usuário</th><th>Perfil</th><th>Departamentos</th><th>Estado</th><th></th></tr></thead><tbody>${users.map(user => `<tr><td>${esc(user.name)}</td><td>${esc(user.username)}</td><td>${esc(perfil[user.role] || user.role)}</td><td class="small">${user.role === 'purchase_manager' ? 'Todos os departamentos' : ['buyer', 'admin', 'category_manager'].includes(user.role) ? (deptTxt(user.departments) ? esc(deptTxt(user.departments)) : '<span class="c-bad">não informado</span>') + ` <button class="btn xs" data-act="admin-user-deps" data-id="${esc(user.id)}">Alterar</button>` : '—'}</td><td>${user.active ? 'Ativo' : 'Inativo'}</td><td>${user.id === Cloud.user.id ? '' : `${user.active && user.role !== 'supplier' ? `<button class="btn xs" data-act="admin-user-password" data-id="${esc(user.id)}" data-name="${esc(user.name)}">Redefinir senha</button> ` : ''}<button class="btn xs ${user.active ? 'danger ghost' : ''}" data-act="admin-user-toggle" data-id="${esc(user.id)}" data-active="${user.active ? '0' : '1'}">${user.active ? 'Desativar' : 'Ativar'}</button>`}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small">Nenhuma conta cadastrada.</p>';
   },
   paint() {
     const target = document.getElementById('adminUsers');
@@ -1987,13 +1999,13 @@ ACTIONS['admin-user-add'] = async () => {
   button.textContent = 'Salvando…';
   const data = Object.fromEntries(new FormData(form));
   delete data.dep;
-  if (data.role === 'buyer') {
+  if (data.role === 'buyer' || data.role === 'category_manager') {
     data.departments = deptValue(form);
-    if (!data.departments.length) { button.innerHTML = originalLabel; button.disabled = false; return toast('Escolha ao menos um departamento do comprador.', 'warn'); }
+    if (!data.departments.length) { button.innerHTML = originalLabel; button.disabled = false; return toast(data.role === 'category_manager' ? 'Escolha ao menos um departamento da gerência.' : 'Escolha ao menos um departamento do comprador.', 'warn'); }
   }
   try {
     await Cloud.request('/api/users', { method: 'POST', body: data });
-    form.reset(); toast('Acesso criado.', 'ok');
+    form.reset(); form.querySelector('[name=role]').dispatchEvent(new Event('change')); toast('Acesso criado.', 'ok');
     await ACTIONS['admin-user-refresh']({});
   } catch (error) { toast(error.message, 'err'); }
   finally { if (button.isConnected) { button.innerHTML = originalLabel; button.disabled = false; } }
@@ -2859,14 +2871,15 @@ const Recep = {
     this.atualizar();
     clearInterval(this.timer);
     // conta da recepção na nuvem: quem atualiza é o canal instantâneo (Cloud.startPolling)
-    this.timer = setInterval(() => { if (!document.getElementById('recepPortal')) return clearInterval(this.timer); if (Cloud.user?.role !== 'reception') this.atualizar(); }, 10000);
+    this.timer = setInterval(() => { if (!document.getElementById('recepPortal')) return clearInterval(this.timer); if (!Cloud.isPanel()) this.atualizar(); }, 10000);
   },
   async sair() {
     clearInterval(this.timer);
     const p = document.getElementById('recepPortal'); if (p) p.remove();
-    Auth.role = 'recep';
+    const gerente = Cloud.isManager();
+    Auth.role = gerente ? 'comp' : 'recep';
     await Cloud.logout();
-    Auth.show('recep');
+    Auth.show(gerente ? 'login' : 'recep');
   },
   // relê o banco deste navegador (outras abas) e a pasta compartilhada (outros computadores)
   async atualizar() {
@@ -2874,7 +2887,7 @@ const Recep = {
     if (this._lendo) { this._denovo = true; return; }
     this._lendo = true;
     try {
-      if (Cloud.user?.role === 'reception') await Cloud.refreshReception();
+      if (Cloud.isPanel()) await Cloud.refreshReception();
       else {
         if (DB.idb) await DB.loadAll();
         if (Share.ok()) { try { await Share.lerTodos(); Share.erro = ''; } catch (e) { Share.falha(e); } }
@@ -2896,14 +2909,14 @@ const Recep = {
     const cols = new Map(), vistos = new Set(), a = Auth.cfg();
     const col = (key, nome, info) => { let c = cols.get(key); if (!c) cols.set(key, c = Object.assign({ key, nome, itens: [] }, info || {})); return c; };
     const localKey = a ? Share.slug(a.usuario) : null;
-    if (Cloud.user?.role !== 'reception') DB.all('demandas').filter(naRecepcao).forEach(d => {
+    if (!Cloud.isPanel()) DB.all('demandas').filter(naRecepcao).forEach(d => {
       const nome = a ? (a.nome || a.usuario) : this.comprador(d);
       const c = col(localKey || 'local_' + Share.slug(nome), nome, { local: true });
       c.itens.push(Object.assign({}, d, { _local: true, compradorNome: nome }));
       vistos.add(d.id);
     });
     // coluna vazia "neste computador" só faz sentido para comprador; a conta da recepção não tem agenda própria
-    if (a && !cols.has(localKey) && !Share.ok() && Cloud.user?.role !== 'reception') col(localKey, a.nome || a.usuario, { local: true });
+    if (a && !cols.has(localKey) && !Share.ok() && !Cloud.isPanel()) col(localKey, a.nome || a.usuario, { local: true });
     Share.remotos.forEach(r => {
       const ov = (Share.overlay[r.slug] || {}).itens || {};
       const c = col(r.slug, r.comprador || r.usuario || 'Comprador', {});
@@ -2974,7 +2987,14 @@ const Recep = {
     const corDe = nome => { let h = 0; for (const ch of String(nome || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return this.CORES[h % this.CORES.length]; };
     const cont = { recepcao: 0, aguardando: 0, agendado: 0, atendimento: 0, concluido: 0, cancelado: 0 };
     todos.forEach(d => cont[this.status(d)]++);
-    const BTN = {
+    const gerente = Cloud.isManager();
+    const BTN = gerente ? {
+      agendado: () => `<div class="rp-btn done">${this.ic('total')} Agendado</div>`,
+      aguardando: () => `<div class="rp-btn done">${this.ic('aguardando')} Aguardando chegada</div>`,
+      recepcao: d => `<div class="rp-btn wait">${this.ic('recepcao')} Na recepção desde ${this.hora(d.chegouEm)}</div>`,
+      atendimento: d => `<div class="rp-btn going">${this.ic('atendimento')} Em atendimento desde ${this.hora(d.iniciouEm)}</div>`,
+      concluido: () => `<button class="rp-btn done" disabled>${icon('check')} Atendimento concluído</button>`
+    } : {
       agendado: d => `<button class="rp-btn red" data-rp="chegou" data-id="${d.id}">${icon('check')} Registrar chegada e avisar</button>`,
       aguardando: d => `<button class="rp-btn red" data-rp="chegou" data-id="${d.id}">${icon('check')} Registrar chegada e avisar</button>`,
       recepcao: () => `<div class="rp-btn wait">${this.ic('aguardando')} Aguardando o comprador iniciar</div>`,
@@ -2985,7 +3005,7 @@ const Recep = {
       if (!d.avisoEm || d.iniciouEm || STATUS_FECHADO.includes(d.status)) return '';
       const ciente = d.avisoVistoEm && d.avisoVistoEm >= d.avisoEm;
       return ciente ? `<div class="rp-aviso ok">${icon('check')} ${esc(this.comprador(d).split(' ')[0])} está ciente (${this.hora(d.avisoVistoEm)})</div>`
-        : `<div class="rp-aviso wait">${icon('bell')} Aviso enviado às ${this.hora(d.avisoEm)} · aguardando o comprador <a data-rp="reavisar" data-id="${d.id}">avisar de novo</a></div>`;
+        : `<div class="rp-aviso wait">${icon('bell')} Aviso enviado às ${this.hora(d.avisoEm)} · aguardando o comprador${gerente ? '' : ` <a data-rp="reavisar" data-id="${d.id}">avisar de novo</a>`}</div>`;
     };
     const card = d => {
       const s = this.status(d), inds = Forn.indsAtend(d), atr = this.atraso(d);
@@ -3003,7 +3023,7 @@ const Recep = {
         ${outrasInds.length === 1 ? `<div class="rp-lab">${esc(outrasInds[0])}</div>` : outrasInds.length ? `<div class="rp-inds">${outrasInds.map(n => `<span>${esc(n)}</span>`).join('')}</div>` : ''}
         <dl class="rp-quem"><dt>Comprador</dt><dd><i></i>${esc(this.comprador(d))}</dd><dt>Departamento</dt><dd>${esc(d.compradorDeps || 'Não informado')}</dd></dl>
         ${d.assunto && d.assunto !== assunto ? `<div class="rp-ass">Assunto: ${esc(d.assunto)}</div>` : ''}
-        <div class="rp-meta ${atr && s !== 'recepcao' ? 'late' : ''}">${esc(info)}${s === 'recepcao' ? ` <a data-rp="voltar" data-id="${d.id}" title="Desfazer a chegada">desfazer</a>` : ''}</div>
+        <div class="rp-meta ${atr && s !== 'recepcao' ? 'late' : ''}">${esc(info)}${s === 'recepcao' && !gerente ? ` <a data-rp="voltar" data-id="${d.id}" title="Desfazer a chegada">desfazer</a>` : ''}</div>
         ${avisoTxt(d)}
         ${d.data > t && (s === 'agendado' || s === 'aguardando') ? `<div class="rp-btn done">${this.ic('total')} Agendado para ${DIAS_CURTO[weekday(d.data)]} ${fmtDateShort(d.data)}</div>` : BTN[s] ? BTN[s](d) : ''}</div>`;
     };
@@ -3013,12 +3033,12 @@ const Recep = {
     const kpi = (k, cls, label, n, sub, f) => `<button type="button" class="rp-kpi rp-kf ${filtro === f ? 'on' : ''}" data-rp="filtro" data-f="${f}" title="${filtro === f && f !== 'abertos' ? 'Clique para voltar aos que estão a fazer' : 'Mostrar só: ' + this.FILTRO_TXT[f]}"><span class="rp-ki ${cls}">${this.ic(k)}</span><div><small>${label}</small><b class="${cls}">${n}</b>${sub ? `<span>${sub}</span>` : ''}</div></button>`;
     const aFazer = cont.agendado + cont.aguardando + cont.recepcao + cont.atendimento;
     const dn = DIAS_SEMANA[weekday(t)] + (weekday(t) > 0 && weekday(t) < 6 ? '-feira' : '');
-    const shBtn = Cloud.user?.role === 'reception' ? '' : !Share.supported ? '' : Share.ok()
+    const shBtn = Cloud.isPanel() ? '' : !Share.supported ? '' : Share.ok()
       ? `<button class="rp-share on" data-rp="share" title="Pasta compartilhada: ${esc(Share.nomePasta())}${Share.erro ? ' — ' + esc(Share.erro) : ''}">${icon('folder')}<span>${Share.erro ? 'Erro na pasta' : fontes.filter(c => !c.local).length + ' comprador(es) conectado(s)'}</span></button>`
       : `<button class="rp-share off" data-rp="share">${icon('folder')}<span>${Share.dir ? 'Reconectar pasta' : 'Conectar pasta compartilhada'}</span></button>`;
-    const vazio = !fontes.length ? `<div class="fp-vazio rp-vazio">${icon('folder')}<b>Nenhum agendamento encontrado</b><span>${Cloud.user?.role === 'reception' ? 'Os agendamentos dos compradores aparecerão aqui assim que forem criados.' : Share.supported ? 'Conecte a pasta compartilhada usada pelos compradores para exibir os agendamentos.' : 'Abra este arquivo no Google Chrome ou Microsoft Edge para ver os agendamentos dos compradores.'}</span></div>` : '';
+    const vazio = !fontes.length ? `<div class="fp-vazio rp-vazio">${icon('folder')}<b>Nenhum agendamento encontrado</b><span>${Cloud.isPanel() ? 'Os agendamentos dos compradores aparecerão aqui assim que forem criados.' : Share.supported ? 'Conecte a pasta compartilhada usada pelos compradores para exibir os agendamentos.' : 'Abra este arquivo no Google Chrome ou Microsoft Edge para ver os agendamentos dos compradores.'}</span></div>` : '';
     el.innerHTML = `<header class="rp-top"><img src="${document.getElementById('brandLogo').src}" alt="Grupo Toureiro">
-        <div class="rp-title"><b>PAINEL DA RECEPÇÃO</b><span>Agendamentos de todos os compradores</span></div>
+        <div class="rp-title"><b>${gerente ? 'PAINEL DA GERÊNCIA' : 'PAINEL DA RECEPÇÃO'}</b><span>${esc(gerente ? (Cloud.user.role === 'purchase_manager' ? 'Gerente de compras · todos os compradores' : 'Gerente de categoria · ' + (deptTxt(Cloud.user.departments) || 'sem departamentos')) : 'Agendamentos de todos os compradores')}</span></div>
         ${shBtn}
         <div class="rp-date">${this.ic('total')}<div><span>${dn}</span><span>${esc(fmtDateLong(t).replace(/^[^,]*,\s*/, ''))}</span></div></div>
         <b class="rp-clockb" id="rpClock">${hm}</b>
@@ -3036,9 +3056,9 @@ const Recep = {
       ${q ? `<div class="rp-outro rp-filt">Busca por <b>“${esc(st.q)}”</b> em todos os agendamentos a partir de hoje · <a data-rp="limpar">limpar busca</a></div>`
         : st.modo === 'prox' ? `<div class="rp-outro">Mostrando os <b>próximos agendamentos</b> a partir de ${desde === t ? 'hoje' : esc(fmtDateLong(desde))} · <a data-rp="modo">ver só o dia</a></div>`
         : dia !== t ? `<div class="rp-outro">Mostrando <b>${esc(fmtDateLong(dia))}</b> · <a data-rp="dia" data-n="0">voltar para hoje</a> · <a data-rp="modo">ver próximos dias</a></div>` : ''}
-      ${Cloud.user?.role !== 'reception' && Share.dir && !Share.ok() ? `<div class="rp-outro rp-warn">${icon('alert')} A pasta compartilhada precisa de permissão de novo. <a data-rp="share">Clique aqui para reconectar</a> e ver os agendamentos dos outros compradores.</div>` : ''}
+      ${!Cloud.isPanel() && Share.dir && !Share.ok() ? `<div class="rp-outro rp-warn">${icon('alert')} A pasta compartilhada precisa de permissão de novo. <a data-rp="share">Clique aqui para reconectar</a> e ver os agendamentos dos outros compradores.</div>` : ''}
       <div class="rp-cols rp-lista">${vazio || (q && !n ? `<div class="fp-vazio">${icon('search')}<b>Nada encontrado</b><span>Confira o nome digitado.</span></div>` : grade)}</div>
-      <footer class="rp-foot"><span class="rp-info-i">i</span><span class="rp-help">Registrar chegada avisa o comprador na tela dele (alerta com som e no sino). O comprador inicia e finaliza o atendimento — o status muda aqui sozinho.</span>
+      <footer class="rp-foot"><span class="rp-info-i">i</span><span class="rp-help">${gerente ? 'Consulta dos agendamentos dos compradores da sua gerência, atualizada na hora. Chegada, início e fim são registrados pela recepção e pelo comprador.' : 'Registrar chegada avisa o comprador na tela dele (alerta com som e no sino). O comprador inicia e finaliza o atendimento — o status muda aqui sozinho.'}</span>
         <span class="rp-leg"><i style="background:#f59e0b"></i>Aguardando<i style="background:#2563eb"></i>Na recepção<i style="background:#16a34a"></i>Em atendimento<i style="background:#6b7280"></i>Concluído</span>
         <div class="rp-dia"><button data-rp="dia" data-n="-1" title="Dia anterior">${icon('chevL')}</button><label>${this.ic('total')} Visualização do dia<input type="date" id="rpDia" value="${dia}"></label><button data-rp="dia" data-n="1" title="Próximo dia">${icon('chevR')}</button></div></footer>`;
   },
@@ -3072,6 +3092,7 @@ const Recep = {
     if (k === 'dia') { const n = +b.dataset.n; st.dia = n === 0 ? today() : addDays(st.dia, n); st.modo = 'dia'; }
     if (k === 'prox') st.modo = 'prox';
     if (['chegou', 'voltar', 'reavisar'].includes(k)) {
+      if (Cloud.isManager()) return; // gerente só consulta
       const d = this.mapa.get(b.dataset.id); if (!d) return;
       b.disabled = true;
       const agora = new Date().toISOString(), novo = { chegouEm: d.chegouEm || null, avisoEm: d.avisoEm || null };
@@ -3091,7 +3112,7 @@ const Recep = {
           await Share.marcar(d._slug, d.id, novo);
           // já mostra a nova etapa no painel, sem esperar a próxima atualização
           Object.assign(d, novo);
-          if (Cloud.user?.role === 'reception') this.atualizar();
+          if (Cloud.isPanel()) this.atualizar();
         }
         toast(msg, k === 'voltar' ? 'info' : 'ok', 4500);
       } catch (err) {

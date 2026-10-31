@@ -1,5 +1,5 @@
 import { database } from './_db.js';
-import { cleanDepartments } from './_departments.js';
+import { ALL_DEPARTMENTS, cleanDepartments } from './_departments.js';
 import { hashPassword, normalizeUsername, publicUser, requireUser, requestBody, respond, revokeSessions, sameOrigin } from './_security.js';
 
 function validName(value) {
@@ -26,8 +26,9 @@ export default async function handler(req, res) {
       if (body.departments != null) {
         const departments = cleanDepartments(body.departments);
         if (!departments || !departments.length) return respond(res, 400, { error: 'Escolha ao menos um departamento valido.' });
+        // gerente de compras sempre tem todos os departamentos
         const updated = await database()`UPDATE app_users SET departments = ${JSON.stringify(departments)}::jsonb
-          WHERE id = ${String(body.id || '')} AND role IN ('buyer', 'admin') RETURNING id`;
+          WHERE id = ${String(body.id || '')} AND role IN ('buyer', 'admin', 'category_manager') RETURNING id`;
         return updated.length ? respond(res, 200, { ok: true, departments }) : respond(res, 404, { error: 'Comprador nao encontrado.' });
       }
       if (!body.id || body.id === admin.id) return respond(res, 400, { error: 'Conta invalida.' });
@@ -56,11 +57,15 @@ export default async function handler(req, res) {
     const username = normalizeUsername(body.username);
     const password = String(body.password || '');
     const role = String(body.role || '');
-    if (!name || !/^[a-z0-9._-]{3,80}$/.test(username) || !['buyer', 'reception'].includes(role) || password.length < 6 || password.length > 256) {
+    if (!name || !/^[a-z0-9._-]{3,80}$/.test(username) || !['buyer', 'reception', 'purchase_manager', 'category_manager'].includes(role) || password.length < 6 || password.length > 256) {
       return respond(res, 400, { error: 'Informe nome, usuario valido, perfil permitido e senha com ao menos 6 caracteres.' });
     }
-    const departments = role === 'buyer' ? cleanDepartments(body.departments) : [];
-    if (role === 'buyer' && (!departments || !departments.length)) return respond(res, 400, { error: 'Escolha ao menos um departamento do comprador.' });
+    // comprador e gerente de categoria escolhem os departamentos; gerente de compras recebe todos
+    const departments = role === 'purchase_manager' ? ALL_DEPARTMENTS
+      : ['buyer', 'category_manager'].includes(role) ? cleanDepartments(body.departments) : [];
+    if (!departments || (['buyer', 'category_manager'].includes(role) && !departments.length)) {
+      return respond(res, 400, { error: role === 'category_manager' ? 'Escolha ao menos um departamento da gerencia.' : 'Escolha ao menos um departamento do comprador.' });
+    }
     const passwordHash = await hashPassword(password);
     const rows = await sql`INSERT INTO app_users (username, username_key, display_name, role, password_hash, departments)
       VALUES (${username}, ${username}, ${name}, ${role}, ${passwordHash}, ${JSON.stringify(departments)}::jsonb)

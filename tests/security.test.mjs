@@ -21,8 +21,8 @@ test('date windows use the configured Sao Paulo timezone', () => {
   assert.equal(shiftDate('2026-01-01', -1), '2025-12-31');
 });
 
-test('buyer login accepts buyer and admin accounts but reception remains isolated', () => {
-  assert.deepEqual(loginRolesForProfile('buyer'), ['buyer', 'admin']);
+test('commercial login accepts buyers, admin and managers but reception remains isolated', () => {
+  assert.deepEqual(loginRolesForProfile('buyer'), ['buyer', 'admin', 'purchase_manager', 'category_manager']);
   assert.deepEqual(loginRolesForProfile('reception'), ['reception']);
   assert.deepEqual(loginRolesForProfile('admin'), []);
 });

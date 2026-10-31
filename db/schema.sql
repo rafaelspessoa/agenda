@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS app_users (
   username TEXT NOT NULL UNIQUE,
   username_key TEXT NOT NULL UNIQUE,
   display_name TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('admin', 'buyer', 'reception', 'supplier')),
+  role TEXT NOT NULL CHECK (role IN ('admin', 'buyer', 'reception', 'supplier', 'purchase_manager', 'category_manager')),
   buyer_id UUID REFERENCES app_users(id) ON DELETE CASCADE,
   supplier_id TEXT,
   password_hash TEXT,
@@ -23,6 +23,10 @@ CREATE TABLE IF NOT EXISTS app_sessions (
 CREATE INDEX IF NOT EXISTS app_sessions_expiry_idx ON app_sessions(expires_at);
 -- departamentos do comprador (códigos da lista em api/_departments.js); identificam o comprador nas telas
 ALTER TABLE app_users ADD COLUMN IF NOT EXISTS departments JSONB NOT NULL DEFAULT '[]'::jsonb;
+-- gerente de compras (vê todos os compradores) e gerente de categoria (vê os compradores dos seus departamentos)
+ALTER TABLE app_users DROP CONSTRAINT IF EXISTS app_users_role_check;
+ALTER TABLE app_users ADD CONSTRAINT app_users_role_check
+  CHECK (role IN ('admin', 'buyer', 'reception', 'supplier', 'purchase_manager', 'category_manager'));
 CREATE UNIQUE INDEX IF NOT EXISTS app_users_supplier_idx ON app_users(buyer_id, supplier_id) WHERE role = 'supplier';
 -- login do fornecedor pelo código interno (o mesmo código pode existir em mais de um comprador)
 CREATE INDEX IF NOT EXISTS app_users_supplier_code_idx ON app_users(supplier_code_hash) WHERE role = 'supplier';
