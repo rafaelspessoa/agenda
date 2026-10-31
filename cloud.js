@@ -455,7 +455,8 @@ const Cloud = {
   // relatório da gerência: agendamentos dos compradores da gerência no período
   async teamReport(de, ate) {
     const { appointments } = await this.request('/api/reception?de=' + encodeURIComponent(de) + '&ate=' + encodeURIComponent(ate));
-    return appointments.map(item => Object.assign({}, item.appointment, { compradorId: item.buyerId, compradorNome: item.buyerName }));
+    return appointments.map(item => Object.assign({}, item.appointment, { compradorId: item.buyerId, compradorNome: item.buyerName,
+      compradorDepCodes: (item.buyerDepartments || []).map(Number), compradorDeps: deptTxt(item.buyerDepartments) }));
   },
 
   async markReception(buyerId, id, state) {

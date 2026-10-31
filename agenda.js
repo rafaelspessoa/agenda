@@ -1594,7 +1594,8 @@ const Equipe = {
     const sit = st.status || 'concluido';
     let arr = this.itens.filter(d => sit === 'todos' || (sit === 'abertos' ? this.situacao(d) !== 'concluido' : this.situacao(d) === sit));
     if (st.comprador) arr = arr.filter(d => d.compradorId === st.comprador);
-    if (st.q) arr = arr.filter(d => matchText(d, st.q, ['compradorNome', 'labNome', 'fornNome', 'assunto', 'titulo', 'descricao']));
+    if (st.dep) arr = arr.filter(d => (d.compradorDepCodes || []).includes(+st.dep));
+    if (st.q) arr = arr.filter(d => matchText(d, st.q, ['compradorNome', 'compradorDeps', 'labNome', 'fornNome', 'assunto', 'titulo', 'descricao']));
     return arr;
   },
   fim(d) { return d.finalizouEm || d.concluidoEm || ''; },
@@ -1611,6 +1612,8 @@ VIEWS.equipe = {
     if (Equipe.chave !== de + '|' + ate) Equipe.carregar(de, ate);
     const arr = Equipe.filtrados(st);
     const compradores = sortBy(Array.from(new Map(Equipe.itens.map(d => [d.compradorId, d.compradorNome])).entries()), c => norm(c[1]));
+    // departamentos dos compradores que aparecem no período
+    const deps = sortBy(Array.from(new Set([].concat(...Equipe.itens.map(d => d.compradorDepCodes || [])))).filter(c => DEPARTAMENTOS[c]), c => c).map(c => [String(c), c + ' · ' + DEPARTAMENTOS[c]]);
     const conc = arr.filter(d => Equipe.situacao(d) === 'concluido').length;
     const escopo = Cloud.user.role === 'purchase_manager' ? 'Todos os compradores' : 'Compradores de ' + (deptTxt(Cloud.user.departments) || 'nenhum departamento');
     const sub = Equipe.carregando && Equipe.chave !== de + '|' + ate ? 'Carregando…' : Equipe.erro ? `<span class="c-bad">${esc(Equipe.erro)}</span>`
@@ -1620,12 +1623,14 @@ VIEWS.equipe = {
       `<label class="small muted">Até <input type="date" data-f="ate" value="${ate}"></label>`,
       `<select data-f="status">${optList([['concluido', 'Concluídos'], ['abertos', 'Não concluídos'], ['todos', 'Todos']], st.status || 'concluido')}</select>`,
       fSelect('comprador', st, compradores, 'Todos os compradores'),
+      fSelect('dep', st, deps, 'Todos os departamentos'),
       fInput('q', st, 'Fornecedor, assunto…')
     ]);
     const cols = [
       { k: 'data', t: 'Data', f: d => fmtDate(d.data) },
       { k: 'hora', t: 'Horário', f: d => esc((d.hora || '') + (d.horaFim ? '–' + d.horaFim : '')) },
       { k: 'compradorNome', t: 'Comprador' },
+      { k: 'compradorDeps', t: 'Departamento', cls: 'small' },
       { k: 'labNome', t: 'Fornecedor', sv: d => d.labNome || d.fornNome || '', f: d => esc(d.labNome || d.fornNome || '') },
       { k: 'assunto', t: 'Assunto', sv: d => d.assunto || d.titulo || '', f: d => esc(d.assunto || d.titulo || '') },
       { k: 'chegouEm', t: 'Chegada', f: d => Recep.hora(d.chegouEm) },
@@ -1643,7 +1648,7 @@ ACTIONS['equipe-atualizar'] = () => { Equipe.chave = ''; App.render(); };
 ACTIONS['exp-equipe'] = () => {
   const st = App.s('equipe'), [de, ate] = Equipe.periodo(st);
   exportRows('agendamentos_equipe_' + de + '_a_' + ate, sortBy(Equipe.filtrados(st), d => d.data, d => d.hora || '').map(d => ({
-    'Data': fmtDate(d.data), 'Horário': d.hora || '', 'Término previsto': d.horaFim || '', 'Comprador': d.compradorNome || '',
+    'Data': fmtDate(d.data), 'Horário': d.hora || '', 'Término previsto': d.horaFim || '', 'Comprador': d.compradorNome || '', 'Departamento': d.compradorDeps || '',
     'Fornecedor': d.labNome || d.fornNome || '', 'Assunto': d.assunto || d.titulo || '', 'Indústrias': Array.isArray(d.industrias) ? d.industrias.join(', ') : (d.industrias || ''),
     'Chegada': Recep.hora(d.chegouEm), 'Início': Recep.hora(d.iniciouEm), 'Fim': Recep.hora(Equipe.fim(d)), 'Duração': Equipe.duracao(d),
     'Situação': Recep.ST_TXT[Equipe.situacao(d)] || '', 'Agendado por': d.agendadoPor || '', 'Observações': d.descricao || ''
