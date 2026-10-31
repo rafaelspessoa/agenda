@@ -831,7 +831,7 @@ const App = {
     const groups = adminMode ? NAV.concat([{ grupo: 'Administração', itens: [['usuarios', 'Contas de acesso']] }]) : NAV;
     const nav = groups.map(g => `<div class="nav-group"><div class="nav-title">${g.grupo}</div>${g.itens.map(([k, t]) =>
       `<a href="#${k}" class="nav-item" data-view="${k}">${icon(k === 'usuarios' ? 'fornecedores' : k)}<span>${t}</span><b class="nav-count" id="nc-${k}"></b></a>`).join('')}</div>`).join('');
-    const gerencia = Cloud.isManager() ? `<div class="nav-group"><div class="nav-title">Gerência</div><a href="#equipe" class="nav-item" data-view="equipe">${icon('agendamentos')}<span>Relatório da equipe</span><b class="nav-count" id="nc-equipe"></b></a><a class="nav-item" data-act="painel-gerencia">${icon('fornecedores')}<span>Painel da gerência</span></a><a href="#usuarios" class="nav-item" data-view="usuarios">${icon('fornecedores')}<span>Compradores</span><b class="nav-count" id="nc-usuarios"></b></a></div>` : '';
+    const gerencia = Cloud.isManager() ? `<div class="nav-group"><div class="nav-title">Gerência</div><a href="#equipe" class="nav-item" data-view="equipe">${icon('agendamentos')}<span>Relatório da equipe</span><b class="nav-count" id="nc-equipe"></b></a><a class="nav-item" data-act="painel-gerencia">${icon('fornecedores')}<span>Painel da gerência</span></a><a href="#usuarios" class="nav-item" data-view="usuarios">${icon('fornecedores')}<span>${Cloud.user.role === 'purchase_manager' ? 'Compradores e gerentes' : 'Compradores'}</span><b class="nav-count" id="nc-usuarios"></b></a></div>` : '';
     document.getElementById('nav').innerHTML = nav + gerencia;
     if (this.view === 'usuarios' && !adminMode && !Cloud.isManager()) this.go('hoje');
   },
@@ -2011,18 +2011,20 @@ VIEWS.usuarios = {
   title: 'Contas de acesso',
   render() {
     const gerente = Cloud.isManager();
-    const perfis = gerente ? '<option value="buyer">Comprador</option>'
+    // gerente de compras também cadastra gerentes de categoria
+    const gCompras = Cloud.user.role === 'purchase_manager';
+    const perfis = gerente ? '<option value="buyer">Comprador</option>' + (gCompras ? '<option value="category_manager">Gerente de categoria</option>' : '')
       : '<option value="buyer">Comprador</option><option value="purchase_manager">Gerente de compras</option><option value="category_manager">Gerente de categoria</option><option value="reception">Recepção</option>';
-    return (gerente ? pageHead('Compradores', 'Cadastre os compradores da sua gerência, redefina senhas e desative quem não deve mais entrar.')
+    return (gerente ? pageHead(gCompras ? 'Compradores e gerentes' : 'Compradores', (gCompras ? 'Cadastre compradores e gerentes de categoria' : 'Cadastre os compradores da sua gerência') + ', redefina senhas e desative quem não deve mais entrar.')
       : pageHead('Contas de acesso', 'Crie os acessos da equipe e desative contas que não devem mais entrar.')) +
-      `<div class="cols2"><div class="card"><h3>${gerente ? 'Novo comprador' : 'Novo acesso interno'}</h3><form class="grid-form" id="adminUserForm" onsubmit="return false">
+      `<div class="cols2"><div class="card"><h3>${gerente && !gCompras ? 'Novo comprador' : 'Novo acesso'}</h3><form class="grid-form" id="adminUserForm" onsubmit="return false">
           <div class="fld span2"><label>Nome</label><input name="name" required></div>
           <div class="fld span2"><label>Usuário</label><input name="username" autocomplete="off" required></div>
           <div class="fld span2"><label>Perfil</label><select name="role">${perfis}</select></div>
           <div class="fld span2"><label>Senha inicial (mínimo 6 caracteres)</label><input type="password" name="password" minlength="6" autocomplete="new-password" required></div>
           <div class="fld span4 dep-fld"><label class="dep-lbl">Departamentos do comprador (escolha um ou mais)</label>${deptChecks([], deptScope())}</div>
           <div class="page-actions span4">${btn(icon('plus') + ' Criar acesso', 'admin-user-add', '', 'primary')}</div>
-        </form></div><div class="card"><div class="card-h"><h3>${gerente ? 'Compradores da gerência' : 'Usuários cadastrados'}</h3><button class="icon-btn" data-act="admin-user-refresh" title="Atualizar">${icon('refresh')}</button></div><div id="adminUsers">${AdminUsers.usersHTML()}</div></div></div>`;
+        </form></div><div class="card"><div class="card-h"><h3>${gCompras ? 'Compradores e gerentes de categoria' : gerente ? 'Compradores da gerência' : 'Usuários cadastrados'}</h3><button class="icon-btn" data-act="admin-user-refresh" title="Atualizar">${icon('refresh')}</button></div><div id="adminUsers">${AdminUsers.usersHTML()}</div></div></div>`;
   },
   mount(st, main) {
     ACTIONS['admin-user-refresh']({});

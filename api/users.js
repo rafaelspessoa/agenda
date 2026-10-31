@@ -7,6 +7,9 @@ const INTERNAL_ROLES = ['buyer', 'reception', ...MANAGERS];
 // gerente de categoria só alcança compradores dos seus departamentos; administrador e gerente de compras alcançam todos
 function scopeOf(user) { return user.role === 'category_manager' ? (Array.isArray(user.departments) ? user.departments : []).map(Number) : null; }
 function touches(departments, scope) { return !scope || (Array.isArray(departments) ? departments : []).some(code => scope.includes(Number(code))); }
+// gerente de compras administra compradores e gerentes de categoria; gerente de categoria, só compradores dos seus departamentos
+function manageableRoles(user) { return user.role === 'purchase_manager' ? ['buyer', 'category_manager'] : ['buyer']; }
+function manages(user, target) { return manageableRoles(user).includes(target.role) && touches(target.departments, scopeOf(user)); }
 
 function validName(value) {
   const name = String(value || '').trim();
@@ -20,8 +23,8 @@ export default async function handler(req, res) {
       if (!admin) return;
       // contas internas (os acessos de laboratório são criados sozinhos pelo código do laboratório)
       let rows = await database()`SELECT id, username, display_name, role, active, buyer_id, departments FROM app_users WHERE role <> 'supplier' ORDER BY role, display_name`;
-      // gerente vê só os compradores que administra
-      if (admin.role !== 'admin') rows = rows.filter(user => user.role === 'buyer' && touches(user.departments, scopeOf(admin)));
+      // gerente vê só as contas que administra
+      if (admin.role !== 'admin') rows = rows.filter(user => manages(admin, user));
       return respond(res, 200, {
         users: rows.map(user => ({ id: user.id, username: user.username, name: user.display_name, role: user.role, active: user.active, buyerId: user.buyer_id, departments: user.departments || [] }))
       });
@@ -34,9 +37,9 @@ export default async function handler(req, res) {
       const scope = scopeOf(admin);
       let target = null;
       if (admin.role !== 'admin') {
-        // gerente só altera compradores da sua gerência
+        // gerente só altera as contas da sua gerência
         [target] = await database()`SELECT role, departments FROM app_users WHERE id = ${String(body.id || '')}`;
-        if (!target || target.role !== 'buyer' || !touches(target.departments, scope)) return respond(res, 404, { error: 'Comprador nao encontrado.' });
+        if (!target || !manages(admin, target)) return respond(res, 404, { error: 'Conta nao encontrada.' });
       }
       if (body.action === 'edit') {
         // nome e usuário: administrador e gerentes (nos seus compradores); perfil: só o administrador
@@ -117,9 +120,9 @@ export default async function handler(req, res) {
     if (!departments || (['buyer', 'category_manager'].includes(role) && !departments.length)) {
       return respond(res, 400, { error: role === 'category_manager' ? 'Escolha ao menos um departamento da gerencia.' : 'Escolha ao menos um departamento do comprador.' });
     }
-    // gerente cadastra só compradores (o de categoria, só nos seus departamentos)
+    // gerente de compras cadastra compradores e gerentes de categoria; o de categoria, só compradores nos seus departamentos
     if (admin.role !== 'admin') {
-      if (role !== 'buyer') return respond(res, 403, { error: 'A gerencia cadastra somente compradores.' });
+      if (!manageableRoles(admin).includes(role)) return respond(res, 403, { error: admin.role === 'purchase_manager' ? 'A gerencia de compras cadastra compradores e gerentes de categoria.' : 'A gerencia de categoria cadastra somente compradores.' });
       const scope = scopeOf(admin);
       if (scope && departments.some(code => !scope.includes(code))) return respond(res, 403, { error: 'Departamento fora da sua gerencia.' });
     }

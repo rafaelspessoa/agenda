@@ -41,7 +41,8 @@ export default async function handler(req, res) {
           AND (r.payload->>'atend' = 'true' OR COALESCE(r.payload->>'hora', '') <> '')
           AND COALESCE(r.payload->>'status', '') <> 'Cancelado'
           AND r.payload->>'data' BETWEEN ${fromDate} AND ${toDate}
-          AND (${allBuyers} OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(u.departments) dep WHERE dep::int = ANY(${scope}::int[])))
+          -- gerente de categoria: só compradores (não outros gerentes) com algum departamento seu
+          AND (${allBuyers} OR (u.role IN ('buyer', 'admin') AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(u.departments) dep WHERE dep::int = ANY(${scope}::int[]))))
         ORDER BY r.payload->>'data', r.payload->>'hora' LIMIT ${report ? 5000 : 1000}`;
       return respond(res, 200, { appointments: rows });
     }
